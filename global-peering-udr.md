@@ -1,3 +1,4 @@
+```sh
 subscription="MSDN THOVUY P130"
 admin_password=UpdateThisValue
 admin_user=azadmin
@@ -51,3 +52,4 @@ az network vnet subnet update --vnet-name we-vnet -n servers -g $rg  --route-tab
 #test VMs
 az vm create --image ubuntults -g $rg -n testvm-we --admin-password $admin_password --admin-username $admin_user -l westeurope --public-ip-address testvm-we-pip --vnet-name we-vnet --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --no-wait
 az vm create --image ubuntults -g $rg -n testvm-ne --admin-password $admin_password --admin-username $admin_user -l northeurope --public-ip-address testvm-ne-pip --vnet-name ne-vnet --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --no-wait
+```
