@@ -35,6 +35,7 @@ az network vnet peering create -g $rg -n ne-to-we --vnet-name ne-vnet --remote-v
 az extension add -n azure-firewall
 fwName=azfw
 az network firewall create --name $fwName --resource-group $rg -l westeurope
+az network public-ip create -g $rg -n "$fwName-pip"  --allocation-method Static --sku Standard
 az network firewall ip-config create -f $fwName -n ipconfig --public-ip-address "$fwName-pip" -g $rg --vnet-name we-vnet
 
 #Route table
