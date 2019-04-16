@@ -25,6 +25,7 @@ az network vnet subnet create -g $rg -n $subnet --vnet-name $vnet --address-pref
 az extension add -n azure-firewall
 fwName=azfw
 az network firewall create --name $fwName --resource-group $rg -l westeurope
+az network public-ip create -g $rg -n "$fwName-pip"  --allocation-method Static --sku Standard
 az network firewall ip-config create -f $fwName -n ipconfig --public-ip-address "$fwName-pip" -g $rg --vnet-name $vnet
 
 #Route table
