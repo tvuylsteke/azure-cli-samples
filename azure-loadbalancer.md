@@ -24,7 +24,7 @@ az network lb create \
     --sku standard \
     --backend-pool-name bepoolinbound \
     --frontend-ip-name myfrontendinbound \
-    --location eastus2 \
+    --location westeurope \
     --public-ip-address mypublicipinbound
 
 az network lb address-pool create \
@@ -46,6 +46,17 @@ az network lb probe create \
     --port 80 \
     --path /
 
+#outbound rule
+az network lb outbound-rule create \
+ --resource-group $rg \
+ --lb-name lb \
+ --name outboundrule \
+ --frontend-ip-configs myfrontendoutbound \
+ --protocol All \
+ --idle-timeout 15 \
+ --outbound-ports 10000 \
+ --address-pool bepooloutbound
+
 #disables outbound-snat
 az network lb rule create \
 --resource-group $rg \
@@ -58,16 +69,5 @@ az network lb rule create \
 --frontend-ip-name myfrontendinbound \
 --backend-pool-name bepoolinbound \
 --disable-outbound-snat
-
-#outbound rule
-az network lb outbound-rule create \
- --resource-group $rg \
- --lb-name lb \
- --name outboundrule \
- --frontend-ip-configs myfrontendoutbound \
- --protocol All \
- --idle-timeout 15 \
- --outbound-ports 10000 \
- --address-pool bepooloutbound
 
 ```
