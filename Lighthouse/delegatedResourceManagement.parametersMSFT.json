@@ -1,0 +1,24 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "mspName": {
+            "value": "Setspn - Server Management"
+        },
+        "mspOfferDescription": {
+            "value": "Setspn  operators"
+        },
+        "managedByTenantId": {
+            "value": "72f988bf-86f1-41af-91ab-2d7cd011db47"
+        },
+        "authorizations": {
+            "value": [
+                {
+                    "principalId": "37d58ba2-3339-4ed8-baa0-b5843c39ed0b",
+                    "principalIdDisplayName": "LightHouse-operators-Christof",
+                    "roleDefinitionId": "b24988ac-6180-42a0-ab88-20f7382dd24c"
+                }                            
+            ]
+        }
+    }
+}

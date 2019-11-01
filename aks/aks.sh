@@ -1,18 +1,19 @@
 #https://aksworkshop.io/
 subscription="MSDN THOVUY P130b"
+#select subscription
+az account set --subscription "$subscription"
 
 version=$(az aks get-versions -l westeurope --query 'orchestrators[-1].orchestratorVersion' -o tsv)
 echo $version
 
-#select subscription
-az account set --subscription "$subscription"
+
 
 #Resource Group
-rg="aks-at-reading"
+rg="aks-learning-friday"
 az group create --name $rg --location westeurope
 
 #WE VNET
-vnet=aks-vnet
+vnet=aks-learn-vnet
 subnet=aks
 #create VNET
 az network vnet create -g $rg -n $vnet --address-prefix 10.1.0.0/16 --subnet-name $subnet --subnet-prefix 10.1.0.0/21 -l westeurope
@@ -27,11 +28,13 @@ az network vnet subnet list \
     --vnet-name $vnet \
     --query [].id --output tsv
 
-subnetid="/subscriptions/182b812e-c741-4b45-93c6-26bdc3e4353b/resourceGroups/aks-at-reading/providers/Microsoft.Network/virtualNetworks/aks-vnet/subnets/aks"
+#or eassier:
+export subnetid=$(az network vnet subnet show --resource-group $rg --name aks --vnet-name $vnet --query id -o tsv)
 
 az aks create \
     --resource-group $rg \
-    --name aksreading \
+    --name akslearn \
+    --node-count 1 \
     --network-plugin azure \
     --vnet-subnet-id $subnetid \
     --docker-bridge-address 172.17.0.1/16 \
@@ -44,12 +47,59 @@ az aks create \
 
 
 #connect
-az aks get-credentials --resource-group $rg --name aksreading
-
+az aks get-credentials --resource-group $rg --name akslearn
 cat /home/thomas/.kube/config
 
 #view current context
 kubectl config view
+
+#
+# demo: KUARD
+
+#apply something by just copy pasting
+cat <<eof | kubectl apply -f -
+copy paste
+eof
+
+#POD
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kuard
+  labels: 
+    app: kuard
+spec:
+  containers:
+  - image: gcr.io/kuar-demo/kuard-amd64:blue
+    name: kuard
+    ports:
+    - containerPort: 8080
+      name: http
+      protocol: TCP
+
+#SERVICE
+apiVersion: v1
+kind: Service
+metadata:
+  name: kuard-front
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 8080
+  selector:
+    app: kuard
+
+#
+
+#get cluster service principal
+#deploy app gw ingress: https://azure.github.io/application-gateway-kubernetes-ingress/setup/install-new/
+
+az aks list
+
+
+
+#
 
 k describe ClusterRole cluster-admin
 
