@@ -1,4 +1,6 @@
-Source with a lot of good information https://github.com/erjosito/azure-wan-lab/
+
+# Credits
+https://github.com/erjosito/azure-wan-lab/
 
 ```
 subscription="MSDN THOVUY P45"
@@ -7,10 +9,10 @@ admin_user=azadmin
 loc="westeurope"
 rg=az-vwan-routing-rg
 
-#select subscription
+# select subscription
 az account set --subscription "$subscription"
 
-#Resource Group
+# Resource Group
 az group create -n $rg -l $loc
 
 #           
@@ -19,17 +21,17 @@ az group create -n $rg -l $loc
 az extension add --name virtual-wan
 az network vwan create -n vwan-routing-lab -g $rg -l westeurope
 
-#upgrade to standard
+# Upgrade to standard
 az network vwan update -n vwan-routing-lab -g $rg --vnet-to-vnet-traffic true
 
 #               
 #   VWAN HUBS   
 #               
-#WE-HUB
+# WE-HUB
 az network vhub create --address-prefix 10.101.10.0/24 -n we-hub -g $rg --vwan vwan-routing-lab -l westeurope
 az network vpn-gateway create -n we-hub-vpngw -g $rg --vhub we-hub --scale-unit 1 -l westeurope --no-wait                    
 
-#NE-HUB
+# NE-HUB
 az network vhub create --address-prefix 10.101.20.0/24 -n ne-hub -g $rg --vwan vwan-routing-lab -l northeurope
 az network vpn-gateway create -n ne-hub-vpngw -g $rg --vhub ne-hub --scale-unit 1 -l northeurope --no-wait                              
 
@@ -74,7 +76,7 @@ az network vpn-gateway connection create -n OnPrem --gateway-name we-hub-vpngw -
 fwIP=10.101.11.132
 az network vhub route add --address-prefixes 10.101.12.0/24 10.101.13.0/24 --next-hop $fwIP -g $rg --vhub-name we-hub
 
-#list and remove
+# list and remove
 az network vhub route list -g $rg --vhub-name we-hub
 az network vhub route remove -g $rg --vhub-name we-hub --index 0
 
