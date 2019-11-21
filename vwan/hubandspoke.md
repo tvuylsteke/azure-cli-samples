@@ -1,3 +1,4 @@
+```
 subscription="MSDN THOVUY P45"
 subscription="Azure CXP FTA Internal Subscription THOVUY"
 admin_password=Microsoft123!
@@ -102,3 +103,4 @@ az network firewall network-rule create \
    --priority 200 \
    --source-addresses 10.0.0.0/8 \
    --action Allow
+```

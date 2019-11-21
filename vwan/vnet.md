@@ -1,3 +1,4 @@
+```
 subscription="MSDN THOVUY P45"
 admin_password=Microsoft123!
 admin_user=azadmin
@@ -37,3 +38,4 @@ rt=we-vnet-servers-RT
 az network route-table create -g $rg -n $rt -l $loc
 az network route-table route create -n toSpoke2 -g $rg --route-table-name $rt --address-prefix 10.101.13.0/24  --next-hop-type VirtualAppliance  --next-hop-ip-address $fwIP
 az network vnet subnet update --vnet-name we-vnet -n servers -g $rg  --route-table $rt
+```
