@@ -1,3 +1,4 @@
+```
 subscription="MSDN THOVUY P45"
 admin_password=Microsoft123!
 admin_user=azadmin
@@ -51,3 +52,4 @@ show crypto ike sa
 sh ip bgp summ
 
 sh ip bgp
+```
