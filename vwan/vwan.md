@@ -1,5 +1,6 @@
-#https://github.com/erjosito/azure-wan-lab/
+Source with a lot of good information https://github.com/erjosito/azure-wan-lab/
 
+```
 subscription="MSDN THOVUY P45"
 admin_password=Microsoft123!
 admin_user=azadmin
@@ -86,3 +87,4 @@ az network vhub route-table delete -n MyRouteTable -g $rg --vhub-name we-hub
 
 az network vhub route-table create -n AllVnets -g $rg --vhub-name we-hub --connections All_Vnets --destination-type CIDR --destinations "10.101.12.0/25" --next-hop-type IPAddress --next-hops $fwIP
 az network vhub route-table create -n AllBranches -g $rg --vhub-name we-hub --connections All_Branches --destination-type CIDR --destinations "10.101.12.0/25" --next-hop-type IPAddress --next-hops $fwIP
+```

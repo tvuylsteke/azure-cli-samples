@@ -1,5 +1,5 @@
-# Configure CSR
-# https://github.com/erjosito/azure-wan-lab/#deploy-configuration-manually
+Configure CSR
+https://github.com/erjosito/azure-wan-lab/#deploy-configuration-manually
 
 <VWAN-0-PIP> first public IP of the VWAN
 <VWAN-0-PeerAddress> first private (BGP Peer) address of the VWAN
