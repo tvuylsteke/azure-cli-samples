@@ -58,13 +58,28 @@ az network vhub connection create -n we-vnet --remote-vnet we-vnet -g $rg --vhub
 az network vhub connection create -n ne-vnet --remote-vnet ne-vnet -g $rg --vhub-name ne-hub
 
 #               
-#   Connect Branch onprem1
+#   Connect Branch onprem1 to WE HUB
 #               
 onprem1CSRpIP=104.40.199.219
 onprem1CSRpeerIP=10.100.1.5
 onprem1CSRasn=65000
 az network vpn-site create --ip-address $onprem1CSRpIP --name OnPrem1CSR --resource-group $rg --bgp-peering-address $onprem1CSRpeerIP --device-model CSR --device-vendor Cisco --virtual-wan vwan-routing-lab --asn $onprem1CSRasn
 az network vpn-gateway connection create -n OnPrem --gateway-name we-hub-vpngw -g $rg --remote-vpn-site OnPrem1CSR --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password"
+
+
+#               
+#   Connect Branch onprem1 to NE HUB (crossed connection)
+#        
+onprem1CSRpIP=104.40.199.219
+onprem1CSRpeerIP=10.100.1.5
+onprem1CSRasn=65000
+#az network vpn-site create --ip-address $onprem1CSRpIP --name OnPrem1CSR --resource-group $rg --bgp-peering-address $onprem1CSRpeerIP --device-model CSR --device-vendor Cisco --virtual-wan vwan-routing-lab --asn $onprem1CSRasn
+az network vpn-gateway connection create -n OnPrem --gateway-name ne-hub-vpngw -g $rg --remote-vpn-site OnPrem1CSR --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password"
+
+
+# For future use
+# https://docs.microsoft.com/en-us/rest/api/virtualwan/vpnconnections/createorupdate
+# az network vpn-site update --name asdfasdf --resource-group rg-bus-east_us-net-01 --set properties.usePolicyBasedTrafficSelectors=True
 
 #               
 #   Advanced routing
