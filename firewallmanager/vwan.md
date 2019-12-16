@@ -1,0 +1,132 @@
+
+# Credits
+https://github.com/erjosito/azure-wan-lab/
+
+```
+subscription="MSDN THOVUY"
+admin_password=Microsoft123!
+admin_user=azadmin
+loc="westeurope"
+rg=az-fw-routing-vwan-rg
+
+# select subscription
+az account set --subscription "$subscription"
+
+# Resource Group
+az group create -n $rg -l $loc
+
+#           
+#   vwan    
+#           
+az extension add --name virtual-wan
+az network vwan create -n vwan-fwrouting-lab -g $rg -l westeurope
+
+# Upgrade to standard #does this work? doesn't seem to work
+#az network vwan update -n vwan-fwrouting-lab -g $rg --vnet-to-vnet-traffic true
+
+#               
+#   VWAN HUBS   
+#               
+# WE-HUB
+az network vhub create --address-prefix 10.101.10.0/24 -n we-hub -g $rg --vwan vwan-fwrouting-lab -l westeurope
+az network vpn-gateway create -n we-hub-vpngw -g $rg --vhub we-hub --scale-unit 1 -l westeurope --no-wait                    
+
+# NE-HUB
+az network vhub create --address-prefix 10.102.10.0/24 -n ne-hub -g $rg --vwan vwan-fwrouting-lab -l northeurope
+az network vpn-gateway create -n ne-hub-vpngw -g $rg --vhub ne-hub --scale-unit 1 -l northeurope --no-wait                              
+
+# network vhub connection optoinal flags
+# --internet-security true
+# list
+# az network vhub connection list --resource-group $rg --vhub-name we-hub
+
+#               
+#   Connect WE hub and Spoke  
+#               
+
+
+weHubVnetId=$(az network vnet show --resource-group az-fw-routing-hubspoke-we-rg --name we-hub-vnet --query id --out tsv)
+weSpoke1VnetId=$(az network vnet show --resource-group az-fw-routing-hubspoke-we-rg --name we-spoke-vnet-01 --query id --out tsv)
+weSpoke2VnetId=$(az network vnet show --resource-group az-fw-routing-hubspoke-we-rg --name we-spoke-vnet-02 --query id --out tsv)
+
+az network vhub connection create -n we-hub-vnet --remote-vnet $weHubVnetId -g $rg --vhub-name we-hub
+az network vhub connection create -n we-spoke-vnet-01 --remote-vnet $weSpoke1VnetId -g $rg --vhub-name we-hub
+az network vhub connection create -n we-spoke-vnet-02 --remote-vnet $weSpoke2VnetId -g $rg --vhub-name we-hub
+
+#               
+#   Connect NE hub and Spoke  
+#               
+
+neHubVnetId=$(az network vnet show --resource-group az-fw-routing-hubspoke-ne-rg --name ne-hub-vnet --query id --out tsv)
+neSpoke1VnetId=$(az network vnet show --resource-group az-fw-routing-hubspoke-ne-rg --name ne-spoke-vnet-01 --query id --out tsv)
+neSpoke2VnetId=$(az network vnet show --resource-group az-fw-routing-hubspoke-ne-rg --name ne-spoke-vnet-02 --query id --out tsv)
+
+az network vhub connection create -n ne-hub-vnet --remote-vnet $neHubVnetId -g $rg --vhub-name ne-hub
+az network vhub connection create -n ne-spoke-vnet-01 --remote-vnet $neSpoke1VnetId -g $rg --vhub-name ne-hub
+az network vhub connection create -n ne-spoke-vnet-02 --remote-vnet $neSpoke2VnetId -g $rg --vhub-name ne-hub
+
+
+
+#               
+#   Connect WE VNET
+#               
+#az network vhub connection create -n we-vnet --remote-vnet we-vnet -g $rg --vhub-name we-hub
+
+#               
+#   Connect NE VNET
+#               
+#az network vhub connection create -n ne-vnet --remote-vnet ne-vnet -g $rg --vhub-name ne-hub
+
+#               
+#   Connect Branch onprem1 to WE HUB
+#               
+onprem1CSRpIP=52.232.71.153
+onprem1CSRpeerIP=10.50.1.5
+onprem1CSRasn=65050
+az network vpn-site create --ip-address $onprem1CSRpIP --name OnPrem1CSR --resource-group $rg --bgp-peering-address $onprem1CSRpeerIP --device-model CSR --device-vendor Cisco --virtual-wan vwan-fwrouting-lab --asn $onprem1CSRasn
+az network vpn-gateway connection create -n OnPrem1toWE --gateway-name we-hub-vpngw -g $rg --remote-vpn-site OnPrem1CSR --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password"
+# Connect Branch onprem1 to NE HUB (crossed connection)
+az network vpn-gateway connection create -n OnPrem1toNE --gateway-name ne-hub-vpngw -g $rg --remote-vpn-site OnPrem1CSR --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password"
+
+
+#               
+#   Connect Branch onprem2 to WE HUB
+#               
+onprem1CSRpIP=52.178.75.132
+onprem1CSRpeerIP=10.60.1.5
+onprem1CSRasn=65060
+az network vpn-site create --ip-address $onprem1CSRpIP --name OnPrem2CSR --resource-group $rg --bgp-peering-address $onprem1CSRpeerIP --device-model CSR --device-vendor Cisco --virtual-wan vwan-fwrouting-lab --asn $onprem1CSRasn
+az network vpn-gateway connection create -n OnPrem2toWE --gateway-name we-hub-vpngw -g $rg --remote-vpn-site OnPrem2CSR --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password"
+# Connect Branch onprem1 to NE HUB (crossed connection)
+az network vpn-gateway connection create -n OnPrem2toNE --gateway-name ne-hub-vpngw -g $rg --remote-vpn-site OnPrem2CSR --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password"
+
+
+
+# For future use
+# https://docs.microsoft.com/en-us/rest/api/virtualwan/vpnconnections/createorupdate
+# az network vpn-site update --name asdfasdf --resource-group rg-bus-east_us-net-01 --set properties.usePolicyBasedTrafficSelectors=True
+
+#               
+#   Advanced routing
+#               
+
+#
+#   traffic to Spoke1/Spoke2
+#
+fwIP=10.101.11.132
+az network vhub route add --address-prefixes 10.101.12.0/24 10.101.13.0/24 --next-hop $fwIP -g $rg --vhub-name we-hub
+
+# list and remove
+az network vhub route list -g $rg --vhub-name we-hub
+az network vhub route remove -g $rg --vhub-name we-hub --index 0
+
+
+#
+#   traffic using route-table (accepts All_Vnets or All_Branches)
+#
+az network vhub route-table list --resource-group $rg --vhub-name we-hub
+az network vhub route-table delete -n MyRouteTable -g $rg --vhub-name we-hub
+
+az network vhub route-table create -n AllVnets -g $rg --vhub-name we-hub --connections All_Vnets --destination-type CIDR --destinations "10.101.12.0/25" --next-hop-type IPAddress --next-hops $fwIP
+az network vhub route-table create -n AllBranches -g $rg --vhub-name we-hub --connections All_Branches --destination-type CIDR --destinations "10.101.12.0/25" --next-hop-type IPAddress --next-hops $fwIP
+```
