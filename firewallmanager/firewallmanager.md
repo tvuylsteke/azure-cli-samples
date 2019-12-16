@@ -1,0 +1,31 @@
+subscription="MSDN THOVUY P130"
+admin_password=Microsoft123!
+admin_user=azadmin
+loc="westeurope"
+rg=az-firewallmanager-rg
+
+#select subscription
+az account set --subscription "$subscription"
+
+az feature show --namespace Microsoft.Network --name AllowCortexSecurity 
+az feature register --namespace Microsoft.Network --name AllowCortexSecurity 
+az provider register -n Microsoft.Network
+
+#Resource Group
+az group create -n $rg -l $loc
+
+vnet=spoke-vnet
+subnet=workload
+az network vnet create -g $rg -n $vnet --address-prefix 10.0.0.0/16 --subnet-name $subnet --subnet-prefix 10.0.1.0/24 -l $loc
+subnet=jump
+az network vnet subnet create -g $rg -n $subnet --vnet-name $vnet --address-prefix 10.0.2.0/24
+
+name=vm-we-spoke
+az vm create --image ubuntults -g $rg -n $name --admin-password $admin_password --admin-username $admin_user -l westeurope --public-ip-address "$name-pip" --vnet-name spoke-vnet --subnet workload --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s --no-wait
+
+
+vnet=spoke2-vnet
+subnet=workload
+az network vnet create -g $rg -n $vnet --address-prefix 10.3.0.0/16 --subnet-name $subnet --subnet-prefix 10.3.1.0/24 -l $loc
+subnet=jump
+az network vnet subnet create -g $rg -n $subnet --vnet-name $vnet --address-prefix 10.3.2.0/24
