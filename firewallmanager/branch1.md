@@ -40,7 +40,7 @@ az vm create -n $prefix"-VM" -g $rg --image UbuntuLTS --admin-username $admin_us
 #Route Table
 rt="$vnet-servers-RT"
 az network route-table create --name $rt --resource-group $rg
-az network route-table route create -n DefaultRoute -g $rg --route-table-name $rt --address-prefix 0.0.0.0/0  --next-hop-type VirtualAppliance  --next-hop-ip-address $fwIP
+az network route-table route create -n DefaultRoute -g $rg --route-table-name $rt --address-prefix 10.0.0.0/8  --next-hop-type VirtualAppliance  --next-hop-ip-address $fwIP
 az network vnet subnet update --name servers --vnet-name $vnet --resource-group $rg --route-table $rt
 
 
