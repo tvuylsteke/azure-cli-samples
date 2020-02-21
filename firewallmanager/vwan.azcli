@@ -3,11 +3,11 @@
 https://github.com/erjosito/azure-wan-lab/
 
 ```
-subscription="MSDN THOVUY"
+subscription="MSDN THOVUY P130b"
 admin_password=Microsoft123!
 admin_user=azadmin
 loc="westeurope"
-rg=az-fw-routing-vwan-rg
+rg=az-fw-routing2-vwan-rg
 
 # select subscription
 az account set --subscription "$subscription"
@@ -92,7 +92,7 @@ az network vpn-gateway connection create -n OnPrem1toNE --gateway-name ne-hub-vp
 #               
 #   Connect Branch onprem2 to WE HUB
 #               
-onprem1CSRpIP=52.178.75.132
+onprem1CSRpIP=23.100.7.39
 onprem1CSRpeerIP=10.60.1.5
 onprem1CSRasn=65060
 az network vpn-site create --ip-address $onprem1CSRpIP --name OnPrem2CSR --resource-group $rg --bgp-peering-address $onprem1CSRpeerIP --device-model CSR --device-vendor Cisco --virtual-wan vwan-fwrouting-lab --asn $onprem1CSRasn
@@ -114,7 +114,7 @@ az network vpn-gateway connection create -n OnPrem2toNE --gateway-name ne-hub-vp
 #   traffic to Spoke1/Spoke2
 #
 fwIP=10.101.11.132
-az network vhub route add --address-prefixes 10.101.12.0/24 10.101.13.0/24 --next-hop $fwIP -g $rg --vhub-name we-hub
+az network vhub route add --address-prefixes 10.101.12.0/24 10.101.13.0/24 10.50.0.0/16 --next-hop $fwIP -g $rg --vhub-name we-hub
 
 # list and remove
 az network vhub route list -g $rg --vhub-name we-hub
@@ -127,6 +127,8 @@ az network vhub route remove -g $rg --vhub-name we-hub --index 0
 az network vhub route-table list --resource-group $rg --vhub-name we-hub
 az network vhub route-table delete -n MyRouteTable -g $rg --vhub-name we-hub
 
-az network vhub route-table create -n AllVnets -g $rg --vhub-name we-hub --connections All_Vnets --destination-type CIDR --destinations "10.101.12.0/25" --next-hop-type IPAddress --next-hops $fwIP
+az network vhub route-table create -n AllVnets -g $rg --vhub-name we-hub --connections All_Vnets --destination-type CIDR --destinations 10.101.12.0/24 10.101.13.0/24 10.50.0.0/16 --next-hop-type IPAddress --next-hops $fwIP
+
+
 az network vhub route-table create -n AllBranches -g $rg --vhub-name we-hub --connections All_Branches --destination-type CIDR --destinations "10.101.12.0/25" --next-hop-type IPAddress --next-hops $fwIP
 ```
