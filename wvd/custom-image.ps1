@@ -36,7 +36,7 @@ cd "C:\Users\thovuy\Documents\github\azure-cli-samples\wvd"
 #$env:packer_tenant_id = "c5f54ad1-572c-40d7-93b2-f51f96023e32"
 #$env:packer_subscription_id = "182b812e-c741-4b45-93c6-26bdc3e4353b"
 
-.\packer.exe build -force -var "img_name=wvd-img-05" .\packer-principal.json
+.\packer.exe build -force -var "img_name=wvd-img-05" "C:\Users\thovuy\Documents\github\azure-cli-samples\wvd\Image\packer-principal_v2.json"
 .\packer.exe build -force .\packer-interactive.json
 
 #deploy new host pool
@@ -45,13 +45,15 @@ $location = "West Europe"
 New-AzResourceGroup -Name $resourceGroupName -Location $location
 
 
+$template_folder = "C:\Users\thovuy\Documents\github\azure-cli-samples\wvd\Templates"
+
 New-AzResourceGroupDeployment -ResourceGroupName $resourceGroupName `
-     -TemplateFile "C:\Users\thovuy\Documents\github\azure-cli-samples\wvd\create-hostpool-template.json" `
-     -TemplateParameterFile "C:\Users\thovuy\Documents\github\azure-cli-samples\wvd\create-hostpool-parameters.json"     
+     -TemplateFile "$template_folder\create-hostpool-template.json" `
+     -TemplateParameterFile "$template_folder\create-hostpool-parameters.json"     
 
 #make sure the service principal has access to the RG to delete VMs!
 New-AzResourceGroupDeployment -ResourceGroupName $resourceGroupName `
-     -TemplateFile "C:\Users\thovuy\Documents\github\azure-cli-samples\wvd\update-hostpool-template.json" `
-     -TemplateParameterFile "C:\Users\thovuy\Documents\github\azure-cli-samples\wvd\update-hostpool-parameters.json" `
+     -TemplateFile "$template_folder\update-hostpool-template.json" `
+     -TemplateParameterFile "$template_folder\update-hostpool-parameters.json" `
      -rdshNamePrefix "wvdp2a" `
      -rdshCustomImageSourceName      

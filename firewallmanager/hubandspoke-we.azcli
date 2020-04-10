@@ -1,9 +1,9 @@
 ```
-subscription="MSDN THOVUY"
+subscription="MSDN THOVUY P130b"
 admin_password=Microsoft123!
 admin_user=azadmin
 loc="westeurope"
-rg=routing-rg
+rg=az-fw-routing-hubspoke-we-rg
 
 #select subscription
 az account set --subscription "$subscription"
@@ -103,15 +103,7 @@ az network firewall network-rule create \
    --source-addresses 10.0.0.0/8 \
    --action Allow
 
-
-
-```
-
-
 Stop and start the firewall
-
-
-```
 
 $rg = "az-vwan-routing-rg"
 $fw = "wehubfw"
@@ -127,6 +119,3 @@ $vnet = Get-AzVirtualNetwork -ResourceGroupName "RG Name" -Name "VNet Name"
 $publicip = Get-AzPublicIpAddress -Name "Public IP Name" -ResourceGroupName " RG Name"
 $azfw.Allocate($vnet,$publicip)
 Set-AzFirewall -AzureFirewall $azfw
-
-
-```
