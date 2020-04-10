@@ -1,0 +1,109 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+      "rdshImageSource": {
+        "value": "CustomImage"
+      },
+      "rdshGalleryImageSKU": {
+        "value": "Windows-10-Enterprise-multi-session-with-Office-365-ProPlus"
+      },
+      "rdshCustomImageSourceName": {
+        "value": "wvd-img-01"
+      },
+      "rdshCustomImageSourceResourceGroup": {
+        "value": "custom-image-packer" 
+      },
+      "rdshNamePrefix": {
+        "value": "wvdp2"
+      },
+      "rdshNumberOfInstances": {
+        "value": 2
+      },
+      "rdshVMDiskType": {
+        "value": "StandardSSD_LRS"
+      },
+      "rdshVmSize": {
+        "value": "Standard_F2"
+      },
+      "enableAcceleratedNetworking": {
+        "value": false
+      },
+      "rdshUseManagedDisks": {
+        "value": true
+      },
+      "domainToJoin": {
+        "value": "setspn.local"
+      },
+      "existingDomainUPN": {
+        "value": "azadmin@setspn.local"
+      },
+      "existingDomainPassword": {
+        "reference": {
+            "keyVault": {
+              "id": "/subscriptions/182b812e-c741-4b45-93c6-26bdc3e4353b/resourceGroups/wvd-keyvault/providers/Microsoft.KeyVault/vaults/setspnvault"
+            },
+            "secretName": "wvd-ad-password"
+          }
+      },
+      "ouPath": {
+        "value": "OU=setspn-wvd,DC=setspn,DC=local"
+      },
+      "existingVnetName": {
+        "value": "wvd-spring-net"
+      },
+      "newOrExistingVnet": {
+        "value": "existing"
+      },
+      "existingSubnetName": {
+        "value": "wvd"
+      },
+      "virtualNetworkResourceGroupName": {
+        "value": "wvd-spring-update"
+      },
+      "rdBrokerURL": {
+        "value": "https://rdbroker.wvd.microsoft.com"
+      },
+      "existingTenantGroupName": {
+        "value": "Default Tenant Group"
+      },
+      "existingTenantName": {
+        "value": "WVD-ADO"
+      },
+      "hostpoolName": {
+        "value": "wvdpool2"
+      },
+      "serviceMetadataLocation": {
+        "value": "United-States"
+      },
+      "enablePersistentDesktop": {
+        "value": false
+      },
+      "defaultDesktopUsers": {
+        "value": ""
+      },
+      "tenantAdminUpnOrApplicationId": {
+        "value": "179a0d38-b16c-4a98-85f7-b758aa161b8a"
+      },
+      "tenantAdminPassword": {
+        "reference": {
+            "keyVault": {
+              "id": "/subscriptions/182b812e-c741-4b45-93c6-26bdc3e4353b/resourceGroups/wvd-keyvault/providers/Microsoft.KeyVault/vaults/setspnvault"
+            },
+            "secretName": "wvd-spn-secret"
+          }
+      },
+      "isServicePrincipal": {
+        "value": true
+      },
+      "aadTenantId": {
+        "value": "c5f54ad1-572c-40d7-93b2-f51f96023e32"
+      },
+      "location": {
+        "value": "West Europe"
+      },
+      "createAvailabilitySet": {
+        "value": true
+      }
+    }
+  }

@@ -1,9 +1,9 @@
 ```
-subscription="MSDN THOVUY P130b"
+subscription="MSDN THOVUY"
 admin_password=Microsoft123!
 admin_user=azadmin
 loc="westeurope"
-rg=az-fw-routing-hubspoke-we-rg
+rg=routing-rg
 
 #select subscription
 az account set --subscription "$subscription"

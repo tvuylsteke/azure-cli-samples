@@ -1,0 +1,53 @@
+{
+    "variables": {        
+        "subscription_id": "{{env `packer_subscription_id`}}"
+    },
+    "builders": [{
+      "type": "azure-arm",  
+      
+      "subscription_id": "{{user `subscription_id`}}",
+
+      "managed_image_resource_group_name": "wvd-packer-image",
+      "managed_image_name": "wvd-img-01",
+  
+      "os_type": "Windows",
+      "image_publisher": "MicrosoftWindowsDesktop",
+      "image_offer": "office-365",
+      "image_sku": "19h2-evd-o365pp",
+  
+      "communicator": "winrm",
+      "winrm_use_ssl": true,
+      "winrm_insecure": true,
+      "winrm_timeout": "5m",
+      "winrm_username": "packer",
+  
+      "azure_tags": {
+          "dept": "Engineering",
+          "task": "Image deployment"
+      },
+  
+      "location": "West Europe",
+      "vm_size": "Standard_DS2_v2"     
+    }],
+    "provisioners": [
+      {
+        "type": "windows-update"
+      },
+      {
+      "type": "powershell",
+      "inline": [
+        "(New-Object System.Net.WebClient).DownloadFile('https://aka.ms/fslogix_download', \"$env:TEMP\\fslogix.zip\")",
+        "Expand-Archive -LiteralPath \"$env:TEMP\\fslogix.zip\" -DestinationPath \"$env:TEMP\\FSLogix\"",
+        "Start-Process -FilePath \"$env:TEMP\\FSLogix\\x64\\Release\\FSLogixAppsSetup.exe\" -ArgumentList  '/install /passive /quiet /norestart'"
+      ]
+      },
+      {
+        "type": "powershell",
+        "inline": [
+          "if( Test-Path $Env:SystemRoot\\windows\\system32\\Sysprep\\unattend.xml ){ rm $Env:SystemRoot\\windows\\system32\\Sysprep\\unattend.xml -Force}",
+          "& $env:SystemRoot\\System32\\Sysprep\\Sysprep.exe /oobe /generalize /quiet /quit",
+          "while($true) { $imageState = Get-ItemProperty HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup\\State | Select ImageState; if($imageState.ImageState -ne 'IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE') { Write-Output $imageState.ImageState; Start-Sleep -s 10  } else { break } }"
+        ]
+    }
+  ]
+  }

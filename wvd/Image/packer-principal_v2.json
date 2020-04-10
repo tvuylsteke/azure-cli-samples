@@ -1,0 +1,88 @@
+{
+    "variables": {
+        "client_id": "{{env `packer_client_id`}}",
+        "client_secret": "{{env `packer_client_secret`}}",
+        "tenant_id": "{{env `packer_tenant_id`}}",
+        "subscription_id": "{{env `packer_subscription_id`}}"
+    },
+    "builders": [{
+      "type": "azure-arm",
+  
+      "client_id": "{{user `client_id`}}",
+      "client_secret": "{{user `client_secret`}}",
+      "tenant_id": "{{user `tenant_id`}}",
+      "subscription_id": "{{user `subscription_id`}}",
+
+      "managed_image_resource_group_name": "custom-image-packer",
+      "managed_image_name": "{{user `img_name`}}",
+  
+      "os_type": "Windows",
+      "image_publisher": "MicrosoftWindowsDesktop",
+      "image_offer": "office-365",
+      "image_sku": "19h2-evd-o365pp",
+  
+      "communicator": "winrm",
+      "winrm_use_ssl": true,
+      "winrm_insecure": true,
+      "winrm_timeout": "5m",
+      "winrm_username": "packer",
+  
+      "azure_tags": {
+          "dept": "Engineering",
+          "task": "Image deployment"
+      },
+  
+      "location": "West Europe",
+      "vm_size": "Standard_DS2_v2"     
+    }],
+    "provisioners": [
+      {
+        "type": "windows-update"
+      },
+      {
+      "type": "powershell",
+      "inline": [
+        "Write-Host \"Downloading FSLogix\"",        
+        "(New-Object System.Net.WebClient).DownloadFile('https://aka.ms/fslogix_download', \"$env:SystemRoot\\Temp\\fslogix.zip\")",
+        "gci $env:SystemRoot\\Temp\\fslogix.zip | write-host",
+        "Write-Host \"Unzipping FSLogix\"",
+        "Expand-Archive -LiteralPath \"$env:SystemRoot\\Temp\\fslogix.zip\" -DestinationPath \"$env:SystemRoot\\Temp\\FSLogix\"",
+        "Write-Host \"Installing FSLogix\"",        
+        "C:\\Windows\\Temp\\FSLogix\\x64\\Release\\FSLogixAppsSetup.exe /install /quiet"
+      ]
+      },
+      {
+        "type": "powershell",
+        "inline": [
+          "Write-Host \"WVD Image Tweaks\"",        
+          "Write-Host \"https://docs.microsoft.com/en-us/azure/virtual-desktop/set-up-customize-master-image\"",  
+          "Write-Host \"Disable Automatic Updates\"",
+          "#doesn't work in image",
+          "reg add \"HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU\" /v NoAutoUpdate /t REG_DWORD /d 1 /f",          
+          "Write-Host \"Set up time zone redirection\"",
+          "reg add \"HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services\" /v fEnableTimeZoneRedirection /t REG_DWORD /d 1 /f",
+          "Write-Host \"Disable Storage Sense\"",
+          "#to be verified",
+          "reg add \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\StorageSense\\Parameters\\StoragePolicy\" /v 01 /t REG_DWORD /d 0 /f",
+          "#Write-Host \"fix Watson crashes\"",
+          "#not found in image",
+          "#remove CorporateWerServer* from Computer\\HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting",
+          "Write-Host \"fix 5k resolution support\"",
+          "reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp\" /v MaxMonitors /t REG_DWORD /d 4 /f",
+          "reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp\" /v MaxXResolution /t REG_DWORD /d 5120 /f",
+          "reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp\" /v MaxYResolution /t REG_DWORD /d 2880 /f",
+          "reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\rdp-sxs\" /v MaxMonitors /t REG_DWORD /d 4 /f",
+          "reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\rdp-sxs\" /v MaxXResolution /t REG_DWORD /d 5120 /f",
+          "reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\rdp-sxs\" /v MaxYResolution /t REG_DWORD /d 2880 /f"
+        ]
+        },
+      {
+        "type": "powershell",
+        "inline": [
+          "if( Test-Path $Env:SystemRoot\\windows\\system32\\Sysprep\\unattend.xml ){ rm $Env:SystemRoot\\windows\\system32\\Sysprep\\unattend.xml -Force}",
+          "& $env:SystemRoot\\System32\\Sysprep\\Sysprep.exe /oobe /generalize /quiet /quit",
+          "while($true) { $imageState = Get-ItemProperty HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup\\State | Select ImageState; if($imageState.ImageState -ne 'IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE') { Write-Output $imageState.ImageState; Start-Sleep -s 10  } else { break } }"
+        ]
+    }
+  ]
+  }
