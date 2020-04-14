@@ -1,4 +1,4 @@
-Source: https://raw.githubusercontent.com/xstof/xstof-fta-wvd/master/wvd-image-creation/README.MD
+One of my sources: https://raw.githubusercontent.com/xstof/xstof-fta-wvd/master/wvd-image-creation/README.MD
 
 # Working with Packer
 

@@ -1,0 +1,59 @@
+{
+    "variables": {
+        "client_id": "{{env `packer_client_id`}}",
+        "client_secret": "{{env `packer_client_secret`}}",
+        "tenant_id": "{{env `packer_tenant_id`}}",
+        "subscription_id": "{{env `packer_subscription_id`}}"
+    },
+    "builders": [{
+      "type": "azure-arm",
+  
+      "client_id": "{{user `client_id`}}",
+      "client_secret": "{{user `client_secret`}}",
+      "tenant_id": "{{user `tenant_id`}}",
+      "subscription_id": "{{user `subscription_id`}}",
+
+      "managed_image_resource_group_name": "custom-image-packer",
+      "managed_image_name": "{{user `img_name`}}",
+  
+      "os_type": "Windows",
+      "image_publisher": "MicrosoftWindowsDesktop",
+      "image_offer": "office-365",
+      "image_sku": "19h2-evd-o365pp",
+  
+      "communicator": "winrm",
+      "winrm_use_ssl": true,
+      "winrm_insecure": true,
+      "winrm_timeout": "5m",
+      "winrm_username": "packer",
+  
+      "azure_tags": {
+          "dept": "Engineering",
+          "task": "Image deployment"
+      },
+  
+      "location": "West Europe",
+      "vm_size": "Standard_DS2_v2"     
+    }],
+    "provisioners": [
+      {
+        "type": "windows-update"
+      },
+      {
+        "type": "powershell",
+        "script": "{{template_dir}}\\install-software.ps1"        
+      },
+      {
+        "type": "powershell",
+        "script": "{{template_dir}}\\tweak-image.ps1"
+        },
+      {
+        "type": "powershell",
+        "inline": [
+          "if( Test-Path $Env:SystemRoot\\windows\\system32\\Sysprep\\unattend.xml ){ rm $Env:SystemRoot\\windows\\system32\\Sysprep\\unattend.xml -Force}",
+          "& $env:SystemRoot\\System32\\Sysprep\\Sysprep.exe /oobe /generalize /quiet /quit",
+          "while($true) { $imageState = Get-ItemProperty HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup\\State | Select ImageState; if($imageState.ImageState -ne 'IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE') { Write-Output $imageState.ImageState; Start-Sleep -s 10  } else { break } }"
+        ]
+    }
+  ]
+  }

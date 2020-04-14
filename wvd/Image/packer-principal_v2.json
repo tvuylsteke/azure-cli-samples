@@ -40,16 +40,8 @@
         "type": "windows-update"
       },
       {
-      "type": "powershell",
-      "inline": [
-        "Write-Host \"Downloading FSLogix\"",        
-        "(New-Object System.Net.WebClient).DownloadFile('https://aka.ms/fslogix_download', \"$env:SystemRoot\\Temp\\fslogix.zip\")",
-        "gci $env:SystemRoot\\Temp\\fslogix.zip | write-host",
-        "Write-Host \"Unzipping FSLogix\"",
-        "Expand-Archive -LiteralPath \"$env:SystemRoot\\Temp\\fslogix.zip\" -DestinationPath \"$env:SystemRoot\\Temp\\FSLogix\"",
-        "Write-Host \"Installing FSLogix\"",        
-        "C:\\Windows\\Temp\\FSLogix\\x64\\Release\\FSLogixAppsSetup.exe /install /quiet"
-      ]
+        "type": "powershell",
+        "script": "{{template_dir}}\\install-software.ps1"        
       },
       {
         "type": "powershell",

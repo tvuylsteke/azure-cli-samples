@@ -1,9 +1,11 @@
 #Source: https://raw.githubusercontent.com/TomHickling/WVD-CI-CD/master/GoldImage/InstallApps.ps1
 #Script to download and install software onto a golden image with Azure DevOps
 
-Set-ExecutionPolicy -ExecutionPolicy Unrestricted
+#Pack does this
+#Set-ExecutionPolicy -ExecutionPolicy Unrestricted
 
 #Create temp folder
+Write-Host "Creating Temp Folder"
 New-Item -Path 'C:\temp' -ItemType Directory -Force | Out-Null
 
 #Install VSCode

@@ -11,11 +11,13 @@ $ag = "Desktop Application Group"
 Get-RdsAppGroupUser -TenantName $t -HostPoolName $hp -AppGroupName $ag
 Add-RdsAppGroupUser $t $hp $ag  -UserPrincipalName wvd9@setspn.tk
 
+
+
 Get-RdsRemoteApp -TenantName $t -HostPoolName $hp -AppGroupName ...
-
-
-
 Get-RdsRemoteDesktop -TenantName $t -HostPoolName $hp -AppGroupName "Desktop Application Group"
+
+
+Get-RdsSessionHost -TenantName $t -HostPoolName $hp
 
 
 for($i = 20; $i -lt 40; $i++){
