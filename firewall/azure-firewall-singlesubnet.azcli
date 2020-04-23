@@ -1,5 +1,5 @@
 subscription="MSDN THOVUY P130b"
-admin_password=UpdateThisValue
+admin_password=$(az keyvault secret show --id https://setspnvault.vault.azure.net/secrets/local-vm-password/efcdc715a1de4dca90806409730fb638 --query 'value' -o tsv)
 admin_user=azadmin
 
 ## Deploys an Az FW 

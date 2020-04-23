@@ -1,0 +1,81 @@
+subscription="MSDN THOVUY P130b"
+#select subscription
+az account set --subscription "$subscription"
+
+
+az feature register --namespace Microsoft.VirtualMachineImages --name VirtualMachineTemplatePreview
+az feature show --namespace Microsoft.VirtualMachineImages --name VirtualMachineTemplatePreview | grep state
+
+az provider show -n Microsoft.VirtualMachineImages | grep registrationState
+az provider show -n Microsoft.Storage | grep registrationState
+az provider show -n Microsoft.Compute | grep registrationState
+az provider show -n Microsoft.KeyVault | grep registrationState
+
+az provider register -n Microsoft.VirtualMachineImages
+
+# set your environment variables here!!!!
+# destination image resource group
+imageResourceGroup=az-imagebuilder
+# location (see possible locations in main docs)
+location=WestUS2
+
+# password for test VM
+vmpassword=$(az keyvault secret show --id https://setspnvault.vault.azure.net/secrets/local-vm-password/efcdc715a1de4dca90806409730fb638 --query 'value' -o tsv)
+# your subscription
+# get the current subID : 'az account show | grep id'
+subscriptionID=$(az account show | grep id | tr -d '",' | cut -c7-)
+
+
+# name of the image to be created
+imageName=aib-wvd-img
+
+# image distribution metadata reference name
+runOutputName=aib-wvd-img-ro
+
+# create resource group
+az group create -n $imageResourceGroup -l $location
+
+
+# download preconfigured example
+filename=./azureimagebuilder/aibRoleImageCreation.json
+curl https://raw.githubusercontent.com/danielsollondon/azvmimagebuilder/master/solutions/12_Creating_AIB_Security_Roles/aibRoleImageCreation.json -o $filename
+sed -i -e "s/<subscriptionID>/$subscriptionID/g" $filename
+sed -i -e "s/<rgName>/$imageResourceGroup/g" $filename
+
+# create role definitions
+az role definition create --role-definition $filename
+
+# grant role definition to the AIB SPN
+az role assignment create \
+    --assignee cf32a0cc-373c-47c9-9156-0db11f6a6dfc \
+    --role "Azure Image Builder Service Image Creation Role" \
+    --scope /subscriptions/$subscriptionID/resourceGroups/$imageResourceGroup
+
+# download the example and configure it with your vars
+filename=./azureimagebuilder/helloImageTemplateWin.json
+curl https://raw.githubusercontent.com/danielsollondon/azvmimagebuilder/master/quickquickstarts/0_Creating_a_Custom_Windows_Managed_Image/helloImageTemplateWin.json -o $filename
+sed -i -e "s/<subscriptionID>/$subscriptionID/g" $filename
+sed -i -e "s/<rgName>/$imageResourceGroup/g" $filename
+sed -i -e "s/<region>/$location/g" $filename
+sed -i -e "s/<imageName>/$imageName/g" $filename
+sed -i -e "s/<runOutputName>/$runOutputName/g" $filename
+
+# submit the image confiuration to the VM Image Builder Service
+
+az resource create \
+    --resource-group $imageResourceGroup \
+    --properties @$filename \
+    --is-full-object \
+    --resource-type Microsoft.VirtualMachineImages/imageTemplates \
+    -n helloImageTemplateWin
+# wait approx 1-3mins, depending on external links
+
+# start the image build
+
+az resource invoke-action \
+     --resource-group $imageResourceGroup \
+     --resource-type  Microsoft.VirtualMachineImages/imageTemplates \
+     -n helloImageTemplateWin \
+     --action Run 
+
+# wait approx 15mins

@@ -2,9 +2,9 @@
 subscription="MSDN THOVUY P130b"
 az account set --subscription "$subscription"
 
-admin_password=UpdateThis
+admin_password=$(az keyvault secret show --id https://setspnvault.vault.azure.net/secrets/local-vm-password/efcdc715a1de4dca90806409730fb638 --query 'value' -o tsv)
 admin_user=azadmin
-rg=az-firewalltest-rg
+rg=az-firewalltest
 vnet=azfw-vnet
 
 azfwsubnet=AzureFirewallSubnet
@@ -36,8 +36,8 @@ az network firewall create --name $fwName --resource-group $rg -l westeurope
 az network public-ip create -g $rg -n "$fwName-pip"  --allocation-method Static --sku Standard
 az network firewall ip-config create -f $fwName -n ipconfig --public-ip-address "$fwName-pip" -g $rg --vnet-name $vnet
 
-azfw_ip=$(az network public-ip show -g $rg -n $azfw_pip_name --query ipAddress -o tsv)
-azfw_id=$(az network firewall show -n $azfw_name -g $rg -o tsv --query id)
+azfw_ip=$(az network public-ip show -g $rg -n "$fwName-pip" --query ipAddress -o tsv)
+azfw_id=$(az network firewall show -n $fwName -g $rg -o tsv --query id)
 
 az monitor log-analytics workspace create -n $logws_name -g $rg
 logws_id=$(az resource list -g $rg -n $logws_name --query '[].id' -o tsv)
@@ -45,13 +45,13 @@ az monitor diagnostic-settings create -n mydiag --resource $azfw_id --workspace 
     --metrics '[{"category": "AllMetrics", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false }, "timeGrain": null}]' \
     --logs '[{"category": "AzureFirewallApplicationRule", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false}}, 
             {"category": "AzureFirewallNetworkRule", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false}}]' >/dev/null
-az network firewall update -n $azfw_name -g $rg
+az network firewall update -n $fwName -g $rg
 
-azfw_private_ip=$(az network firewall show -n $azfw_name -g $rg -o tsv --query 'ipConfigurations[0].privateIpAddress')
+azfw_private_ip=$(az network firewall show -n $fwName -g $rg -o tsv --query 'ipConfigurations[0].privateIpAddress')
 
 az network firewall application-rule create \
    --collection-name App-Coll01 \
-   --firewall-name $azfw_name \
+   --firewall-name $fwName \
    --name Deny-Google \
    --protocols Http=80 Https=443 \
    --resource-group $rg \
@@ -64,7 +64,7 @@ az network firewall network-rule create \
    --collection-name PrivateTraffic \
    --destination-addresses 10.0.0.0/8 \
    --destination-ports '*' \
-   --firewall-name $azfw_name \
+   --firewall-name $fwName \
    --name Allow-All \
    --protocols Any \
    --resource-group $rg \
@@ -74,7 +74,8 @@ az network firewall network-rule create \
 
 #Server Route table
 az network route-table create -g $rg -n $serverRT -l westeurope
-az network route-table route create -n toInternet -g $rg --route-table-name $serverRT --address-prefix 10.1.2.0/24  --next-hop-type VirtualAppliance  --next-hop-ip-address $azfw_private_ip
+#az network route-table route create -n toInternet -g $rg --route-table-name $serverRT --address-prefix 10.1.2.0/24  --next-hop-type VirtualAppliance  --next-hop-ip-address $azfw_private_ip
+az network route-table route create -n toInternet -g $rg --route-table-name $serverRT --address-prefix 0.0.0.0/0  --next-hop-type VirtualAppliance  --next-hop-ip-address $azfw_private_ip
 #avoid SSH being broken for "my" client
 my_ip=$(curl -s4 ifconfig.co)
 az network route-table route create -n clientIP --route-table-name $serverRT -g $rg --next-hop-type Internet --address-prefix "$my_ip/32"
