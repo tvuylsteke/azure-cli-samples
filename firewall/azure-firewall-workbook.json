@@ -132,6 +132,68 @@
         "name": "links - 22"
       },
       {
+        "type": 10,
+        "content": {
+          "chartId": "workbookcbeb0549-3190-49dc-9f65-bfda3984dc77",
+          "version": "MetricsItem/2.0",
+          "size": 1,
+          "chartType": 2,
+          "metricScope": 0,
+          "resourceIds": [
+            "/subscriptions/45f9252d-e27e-4ed8-ab4e-dc5054de13fa/resourceGroups/hotels-sharedsvcs-net-rg/providers/Microsoft.Network/azureFirewalls/hotels-sharedsvcs-az-fw"
+          ],
+          "timeContext": {
+            "durationMs": 0
+          },
+          "timeContextFromParameter": "TimeRange",
+          "resourceType": "microsoft.network/azurefirewalls",
+          "metrics": [
+            {
+              "namespace": "microsoft.network/azurefirewalls",
+              "metric": "microsoft.network/azurefirewalls--DataProcessed",
+              "aggregation": 1,
+              "splitBy": null
+            }
+          ],
+          "gridSettings": {
+            "rowLimit": 10000
+          }
+        },
+        "customWidth": "50",
+        "name": "metric - 23 - Copy"
+      },
+      {
+        "type": 10,
+        "content": {
+          "chartId": "workbookcbeb0549-3190-49dc-9f65-bfda3984dc77",
+          "version": "MetricsItem/2.0",
+          "size": 1,
+          "chartType": 2,
+          "metricScope": 0,
+          "resourceIds": [
+            "/subscriptions/45f9252d-e27e-4ed8-ab4e-dc5054de13fa/resourceGroups/hotels-sharedsvcs-net-rg/providers/Microsoft.Network/azureFirewalls/hotels-sharedsvcs-az-fw"
+          ],
+          "timeContext": {
+            "durationMs": 0
+          },
+          "timeContextFromParameter": "TimeRange",
+          "resourceType": "microsoft.network/azurefirewalls",
+          "metrics": [
+            {
+              "namespace": "microsoft.network/azurefirewalls",
+              "metric": "microsoft.network/azurefirewalls--FirewallHealth",
+              "aggregation": 4,
+              "splitBy": null
+            }
+          ],
+          "gridSettings": {
+            "rowLimit": 10000
+          }
+        },
+        "customWidth": "50",
+        "name": "metric - 23"
+      },
+      {
         "type": 3,
         "content": {
           "version": "KqlItem/1.0",
