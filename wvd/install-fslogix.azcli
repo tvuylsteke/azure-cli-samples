@@ -1,0 +1,19 @@
+subscription="MSDN THOVUY P130b"
+az account set --subscription "$subscription"
+rg=wvd-spring-update
+vm=tv-2
+
+az vm run-command invoke  --command-id RunPowerShellScript --name $vm -g $rg  \
+    --scripts '#Installing FSLogix' \
+    '(New-Object System.Net.WebClient).DownloadFile("https://aka.ms/fslogix_download", "$($env:TEMP)\fslogix.zip")' \
+	'Expand-Archive -LiteralPath "$($env:TEMP)\fslogix.zip" -DestinationPath "$($env:TEMP)\FSLogix"' \
+	'Start-Process -FilePath "$($env:TEMP)\FSLogix\x64\Release\FSLogixAppsSetup.exe" -ArgumentList  "/install /passive /quiet /norestart"' \
+
+
+# Az Files
+net use z: \\setspnfs.file.core.windows.net\profiles
+
+icacls z: /grant wvd-users:(M)
+icacls z: /grant "Creator Owner":(OI)(CI)(IO)(M)
+icacls z: /remove "Authenticated Users"
+icacls z: /remove "Builtin\Users"

@@ -2,11 +2,11 @@
     "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentParameters.json#",
     "contentVersion": "1.0.0.0",
     "parameters": {
-        "mspName": {
-            "value": "Setspn - Server Management"
+        "mspOfferName": {
+            "value": "Setspn - Azure Lab Operations"
         },
         "mspOfferDescription": {
-            "value": "Setspn  operators"
+            "value": "Setspn  Operators"
         },
         "managedByTenantId": {
             "value": "c5f54ad1-572c-40d7-93b2-f51f96023e32"
@@ -14,17 +14,17 @@
         "authorizations": {
             "value": [
                 {
-                    "principalId": "05db46b1-eed6-48c2-a3cb-5356bc014a34",
+                    "principalId": "b50de784-83cf-4156-85a2-b05197e9fe19",
                     "principalIdDisplayName": "LightHouse-operators-LHDemo-Contributor",
                     "roleDefinitionId": "b24988ac-6180-42a0-ab88-20f7382dd24c"
                 },
                 {
-                    "principalId": "05db46b1-eed6-48c2-a3cb-5356bc014a34",
+                    "principalId": "b50de784-83cf-4156-85a2-b05197e9fe19",
                     "principalIdDisplayName": "LightHouse-operators-LHDemo-PolicyContributor",
                     "roleDefinitionId": "36243c78-bf99-498c-9df9-86d9f8d28608"
                 },
                 {
-                    "principalId": "05db46b1-eed6-48c2-a3cb-5356bc014a34",
+                    "principalId": "b50de784-83cf-4156-85a2-b05197e9fe19",
                     "principalIdDisplayName": "LightHouse-operators-LHDemo-userAccessAdmin",
                     "roleDefinitionId": "18d7d88d-d35e-4fb5-a5c3-7773c20a72d9",
                     "delegatedRoleDefinitionIds": [

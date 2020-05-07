@@ -14,7 +14,7 @@ subnet=servers
 #create VNET
 az network vnet create -g $rg -n $vnet --address-prefix 10.1.0.0/16 --subnet-name $subnet --subnet-prefix 10.1.0.0/24 -l westeurope
 
-#create subnet
+#create public IP's
 az network public-ip create --resource-group $rg --name mypublicipinbound --sku standard
 az network public-ip create --resource-group $rg --name mypublicipoutbound --sku standard
 
