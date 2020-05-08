@@ -12,7 +12,59 @@
         "type": 9,
         "content": {
           "version": "KqlParameterItem/1.0",
+          "crossComponentResources": [
+            "{Subscription}"
+          ],
           "parameters": [
+            {
+              "id": "daa43ab7-7aef-43e6-aabc-eaeb9dc68415",
+              "version": "KqlParameterItem/1.0",
+              "name": "Subscription",
+              "type": 6,
+              "isRequired": true,
+              "multiSelect": true,
+              "quote": "'",
+              "delimiter": ",",
+              "value": [
+                "value::all"
+              ],
+              "typeSettings": {
+                "additionalResourceOptions": [
+                  "value::all"
+                ],
+                "includeAll": true
+              },
+              "timeContextFromParameter": "TimeRange",
+              "resourceType": "microsoft.insights/components"
+            },
+            {
+              "id": "526a1c49-dfa1-4913-b292-9d1f9985200b",
+              "version": "KqlParameterItem/1.0",
+              "name": "Workspace",
+              "type": 5,
+              "isRequired": true,
+              "multiSelect": true,
+              "quote": "'",
+              "delimiter": ",",
+              "query": "where type =~ 'microsoft.operationalinsights/workspaces'\r\n| summarize by id, name\r\n| project id",
+              "crossComponentResources": [
+                "{Subscription}"
+              ],
+              "typeSettings": {
+                "resourceTypeFilter": {
+                  "microsoft.operationalinsights/workspaces": true
+                },
+                "additionalResourceOptions": [
+                  "value::all"
+                ]
+              },
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "value": [
+                "value::all"
+              ]
+            },
             {
               "id": "ab7d6c51-d7df-436c-96a2-429163aa50ec",
               "version": "KqlParameterItem/1.0",
@@ -73,28 +125,11 @@
                 "allowCustom": true
               },
               "resourceType": "microsoft.insights/components"
-            },
-            {
-              "id": "7f1f991d-7b52-48e2-853c-503ab7719b8a",
-              "version": "KqlParameterItem/1.0",
-              "name": "Resource",
-              "label": "Firewall",
-              "type": 2,
-              "multiSelect": true,
-              "quote": "'",
-              "delimiter": ",",
-              "query": "AzureDiagnostics\r\n| where Category == \"AzureFirewallApplicationRule\" or Category  == \"AzureFirewallNetworkRule\"\r\n| summarize by Resource",
-              "value": [],
-              "typeSettings": {
-                "additionalResourceOptions": []
-              },
-              "queryType": 0,
-              "resourceType": "microsoft.operationalinsights/workspaces"
             }
           ],
           "style": "pills",
-          "queryType": 0,
-          "resourceType": "microsoft.operationalinsights/workspaces"
+          "queryType": 1,
+          "resourceType": "microsoft.resourcegraph/resources"
         },
         "name": "parameters - 1"
       },
@@ -385,6 +420,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "visualization": "linechart"
         },
         "conditionalVisibility": {
@@ -398,7 +436,7 @@
       {
         "type": 1,
         "content": {
-          "json": "---\r\n# Azure Firewall - Application rule log statitics"
+          "json": "---\r\n# Azure Firewall - Application rule log statistics"
         },
         "conditionalVisibility": {
           "parameterName": "selectedTab",
@@ -420,6 +458,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "visualization": "tiles",
           "tileSettings": {
             "titleContent": {
@@ -465,6 +506,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "gridSettings": {
             "formatters": [
               {
@@ -507,6 +551,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "gridSettings": {
             "formatters": [
               {
@@ -549,6 +596,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "visualization": "areachart",
           "tileSettings": {
             "showBorder": false
@@ -575,6 +625,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "visualization": "table",
           "gridSettings": {
             "filter": true
@@ -601,6 +654,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "visualization": "areachart"
         },
         "conditionalVisibility": {
@@ -624,6 +680,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "visualization": "table",
           "gridSettings": {
             "filter": true
@@ -662,6 +721,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "visualization": "timechart"
         },
         "conditionalVisibility": {
@@ -684,6 +746,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "visualization": "piechart"
         },
         "conditionalVisibility": {
@@ -708,6 +773,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "visualization": "table",
           "gridSettings": {
             "filter": true
@@ -734,6 +802,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "visualization": "piechart"
         },
         "conditionalVisibility": {
@@ -758,6 +829,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "gridSettings": {
             "filter": true
           }
@@ -783,6 +857,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "visualization": "piechart"
         },
         "conditionalVisibility": {
@@ -807,6 +884,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "gridSettings": {
             "filter": true
           }
@@ -832,6 +912,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "visualization": "piechart"
         },
         "conditionalVisibility": {
@@ -855,6 +938,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "visualization": "timechart"
         },
         "conditionalVisibility": {
@@ -879,6 +965,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "gridSettings": {
             "filter": true
           }
@@ -904,6 +993,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "visualization": "table",
           "gridSettings": {
             "formatters": [
@@ -942,6 +1034,9 @@
           "timeContextFromParameter": "TimeRange",
           "queryType": 0,
           "resourceType": "microsoft.operationalinsights/workspaces",
+          "crossComponentResources": [
+            "{Workspace}"
+          ],
           "visualization": "table",
           "gridSettings": {
             "formatters": [
