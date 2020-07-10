@@ -23,6 +23,12 @@ admin_user=azadmin
 csr2t_config_url="https://raw.githubusercontent.com/tvuylsteke/azure-cli-samples/master/vwan-routing-v2/csr_config_2tunnels.txt"
 csr4t_config_url="https://raw.githubusercontent.com/tvuylsteke/azure-cli-samples/master/vwan-routing-v2/csr_config_4tunnels.txt"
 
+###############################
+## Feature Flags
+###############################
+# if crossconnection = true then branch offices (VPN) will be connected to both hubs
+crossconnection=true
+
 # Resource Group
 az group create -n $rg -l $loc
 
@@ -46,13 +52,17 @@ az network vpn-gateway create -n ne-hub-vpngw --vhub ne-hub --scale-unit 1 -l $l
 az network vpn-site create -n OnPrem1CSR --asn 65001  --ip-address 1.2.3.4 --bgp-peering-address 5.6.7.8 -g $rg --device-model CSR --device-vendor Cisco --virtual-wan $vwan
 az network vpn-gateway connection create -n OnPrem1toWE --gateway-name we-hub-vpngw --remote-vpn-site OnPrem1CSR -g $rg --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password"
 # Connect Branch onprem1 to NE HUB (crossed connection)
+if[$crossconnection] then
 az network vpn-gateway connection create -n OnPrem1toNE --gateway-name ne-hub-vpngw --remote-vpn-site OnPrem1CSR -g $rg --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password"
+fi
 
 ## Connect Branch onprem2 to NE HUB (using dummy values for now)             
 az network vpn-site create -n OnPrem2CSR --asn 65002  --ip-address 11.12.13.14 --bgp-peering-address 15.16.17.18 -g $rg --device-model CSR --device-vendor Cisco --virtual-wan $vwan
 az network vpn-gateway connection create -n OnPrem2toNE --gateway-name ne-hub-vpngw --remote-vpn-site OnPrem2CSR -g $rg --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password"
 # Connect Branch onprem1 to WE HUB (crossed connection)
+if[$crossconnection] then
 az network vpn-gateway connection create -n OnPrem2toWE --gateway-name we-hub-vpngw --remote-vpn-site OnPrem2CSR -g $rg  --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password"
+fi
 
 # Log Analytics
 logws_name=log$RANDOM
@@ -61,7 +71,7 @@ logws_id=$(az resource list -g $rg -n $logws_name --query '[].id' -o tsv)
 we_hub_vpngw_id=$(az network vpn-gateway show -n we-hub-vpngw -g $rg --query id -o tsv)
 ne_hub_vpngw_id=$(az network vpn-gateway show -n ne-hub-vpngw -g $rg --query id -o tsv)
 #az provider register --namespace Microsoft.Insights
-az monitor diagnostic-settings create --verbose -n mydiag --resource $we_hub_vpngw_id --workspace $logws_id \
+az monitor diagnostic-settings create -n mydiag --resource $we_hub_vpngw_id --workspace $logws_id \
     --metrics '[{"category": "AllMetrics", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false }, "timeGrain": null}]' \
     --logs '[{"category": "GatewayDiagnosticLog", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false}}, 
             {"category": "TunnelDiagnosticLog", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false}},
@@ -282,15 +292,66 @@ az network vnet subnet update --name $subnet1 --vnet-name $vnet --resource-group
 # Update VWAN config with real values
 az network vpn-site update -n $site --ip-address $csrpip --asn $branch_asn --bgp-peering-address $fwIP --virtual-wan $vwan -g $rg 
 
+# Cross Connection means each branch is connected to 2 VWAN Hubs to 2x2=4 tunnels
+if[$crossconnection] then
 # Extract info for branch
 # a VPN site might have connections to multiple VWAN HUB VPN Gateways. The region determines the HUB the GW is running in
 region="West Europe"
-branch_psk=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .connectionConfiguration.PSK')
-branch_gw0_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance0')
-branch_gw1_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance1')
-branch_gw0_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance0')
-branch_gw1_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance1')
-echo "Extracted info for $site: Gateway0 $branch_gw0_pip, $branch_gw0_bgp_ip Gateway1 $branch_gw1_pip, $branch_gw1_bgp_ip. PSK $branch_psk"
+wehub_psk=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .connectionConfiguration.PSK')
+wehub_gw0_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance0')
+wehub_gw1_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance1')
+wehub_gw0_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance0')
+wehub_gw1_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance1')
+echo "Extracted info for $site: Gateway0 $wehub_gw0_pip, $wehub_gw0_bgp_ip Gateway1 $wehub_gw1_pip, $wehub_gw1_bgp_ip. PSK $wehub_psk"
+
+region="North Europe"
+#We're assuming same PSK for all tunnels...
+#nehub_psk=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .connectionConfiguration.PSK')
+nehub_gw0_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance0')
+nehub_gw1_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance1')
+nehub_gw0_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance0')
+nehub_gw1_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance1')
+echo "Extracted info for $site: Gateway0 $nehub_gw0_pip, $nehub_gw0_bgp_ip Gateway1 $nehub_gw1_pip, $nehub_gw1_bgp_ip. PSK $nehub_psk"
+
+### CSR config
+#CSRNET=10.50.0.0
+#CSRMASK=255.255.0.0
+#CSRGW=10.50.1.1
+
+csr_config_url=$csr4t_config_url
+config_file_csr='branch2_csr.cfg'
+config_file_local='/tmp/branch2_csr.cfg'
+wget $csr_config_url -O $config_file_local
+sed -i "s|\*\*PSK\*\*|${wehub_psk}|g" $config_file_local
+sed -i "s|\*\*GW0_Private_IP\*\*|${wehub_gw0_bgp_ip}|g" $config_file_local
+sed -i "s|\*\*GW1_Private_IP\*\*|${wehub_gw0_bgp_ip}|g" $config_file_local
+sed -i "s|\*\*GW2_Private_IP\*\*|${nehub_gw0_bgp_ip}|g" $config_file_local
+sed -i "s|\*\*GW3_Private_IP\*\*|${nehub_gw1_bgp_ip}|g" $config_file_local
+sed -i "s|\*\*GW0_Public_IP\*\*|${wehub_gw0_pip}|g" $config_file_local
+sed -i "s|\*\*GW1_Public_IP\*\*|${wehub_gw1_pip}|g" $config_file_local
+sed -i "s|\*\*GW2_Public_IP\*\*|${nehub_gw0_pip}|g" $config_file_local
+sed -i "s|\*\*GW3_Public_IP\*\*|${nehub_gw1_pip}|g" $config_file_local
+sed -i "s|\*\*BGP_ID\*\*|${branch_asn}|g" $config_file_local
+scp $config_file_local ${csrpip}:/${config_file_csr}
+ssh $csrpip <<EOF
+  config t
+    file prompt quiet
+EOF
+ssh $csrpip "copy bootflash:${config_file_csr} running-config"
+ssh $csrpip "wr mem"
+ssh $csrpip "sh ip int b"
+
+else
+# No Cross Connection, so each branch is connected to one VWAN Hub: 2 tunnels
+# Extract info for branch
+# a VPN site might have connections to multiple VWAN HUB VPN Gateways. The region determines the HUB the GW is running in
+region="West Europe"
+hub_psk=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .connectionConfiguration.PSK')
+hub_gw0_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance0')
+hub_gw1_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance1')
+hub_gw0_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance0')
+hub_gw1_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance1')
+echo "Extracted info for $site: Gateway0 $hub_gw0_pip, $hub_gw0_bgp_ip Gateway1 $hub_gw1_pip, $hub_gw1_bgp_ip. PSK $hub_psk"
 
 ### CSR config
 #CSRNET=10.50.0.0
@@ -301,11 +362,11 @@ csr_config_url=$csr2t_config_url
 config_file_csr='branch2_csr.cfg'
 config_file_local='/tmp/branch2_csr.cfg'
 wget $csr_config_url -O $config_file_local
-sed -i "s|\*\*PSK\*\*|${branch_psk}|g" $config_file_local
-sed -i "s|\*\*GW0_Private_IP\*\*|${branch_gw0_bgp_ip}|g" $config_file_local
-sed -i "s|\*\*GW1_Private_IP\*\*|${branch_gw1_bgp_ip}|g" $config_file_local
-sed -i "s|\*\*GW0_Public_IP\*\*|${branch_gw0_pip}|g" $config_file_local
-sed -i "s|\*\*GW1_Public_IP\*\*|${branch_gw1_pip}|g" $config_file_local
+sed -i "s|\*\*PSK\*\*|${hub_psk}|g" $config_file_local
+sed -i "s|\*\*GW0_Private_IP\*\*|${hub_gw0_bgp_ip}|g" $config_file_local
+sed -i "s|\*\*GW1_Private_IP\*\*|${hub_gw1_bgp_ip}|g" $config_file_local
+sed -i "s|\*\*GW0_Public_IP\*\*|${hub_gw0_pip}|g" $config_file_local
+sed -i "s|\*\*GW1_Public_IP\*\*|${hub_gw1_pip}|g" $config_file_local
 sed -i "s|\*\*BGP_ID\*\*|${branch_asn}|g" $config_file_local
 scp $config_file_local ${csrpip}:/${config_file_csr}
 ssh $csrpip <<EOF
@@ -315,6 +376,8 @@ EOF
 ssh $csrpip "copy bootflash:${config_file_csr} running-config"
 ssh $csrpip "wr mem"
 ssh $csrpip "sh ip int b"
+
+fi
 
 ################################
 ## Branch 2
@@ -354,15 +417,66 @@ az network vnet subnet update --name $subnet1 --vnet-name $vnet --resource-group
 # Update VWAN config with real values
 az network vpn-site update -n $site --ip-address $csrpip --asn $branch_asn --bgp-peering-address $fwIP --virtual-wan $vwan -g $rg 
 
+# Cross Connection means each branch is connected to 2 VWAN Hubs to 2x2=4 tunnels
+if[$crossconnection] then
+# Extract info for branch
+# a VPN site might have connections to multiple VWAN HUB VPN Gateways. The region determines the HUB the GW is running in
+region="West Europe"
+wehub_psk=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .connectionConfiguration.PSK')
+wehub_gw0_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance0')
+wehub_gw1_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance1')
+wehub_gw0_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance0')
+wehub_gw1_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance1')
+echo "Extracted info for $site: Gateway0 $wehub_gw0_pip, $wehub_gw0_bgp_ip Gateway1 $wehub_gw1_pip, $wehub_gw1_bgp_ip. PSK $wehub_psk"
+
+region="North Europe"
+#We're assuming same PSK for all tunnels...
+#nehub_psk=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .connectionConfiguration.PSK')
+nehub_gw0_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance0')
+nehub_gw1_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance1')
+nehub_gw0_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance0')
+nehub_gw1_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance1')
+echo "Extracted info for $site: Gateway0 $nehub_gw0_pip, $nehub_gw0_bgp_ip Gateway1 $nehub_gw1_pip, $nehub_gw1_bgp_ip. PSK $nehub_psk"
+
+### CSR config
+#CSRNET=10.50.0.0
+#CSRMASK=255.255.0.0
+#CSRGW=10.50.1.1
+
+csr_config_url=$csr4t_config_url
+config_file_csr='branch2_csr.cfg'
+config_file_local='/tmp/branch2_csr.cfg'
+wget $csr_config_url -O $config_file_local
+sed -i "s|\*\*PSK\*\*|${wehub_psk}|g" $config_file_local
+sed -i "s|\*\*GW0_Private_IP\*\*|${wehub_gw0_bgp_ip}|g" $config_file_local
+sed -i "s|\*\*GW1_Private_IP\*\*|${wehub_gw0_bgp_ip}|g" $config_file_local
+sed -i "s|\*\*GW2_Private_IP\*\*|${nehub_gw0_bgp_ip}|g" $config_file_local
+sed -i "s|\*\*GW3_Private_IP\*\*|${nehub_gw1_bgp_ip}|g" $config_file_local
+sed -i "s|\*\*GW0_Public_IP\*\*|${wehub_gw0_pip}|g" $config_file_local
+sed -i "s|\*\*GW1_Public_IP\*\*|${wehub_gw1_pip}|g" $config_file_local
+sed -i "s|\*\*GW2_Public_IP\*\*|${nehub_gw0_pip}|g" $config_file_local
+sed -i "s|\*\*GW3_Public_IP\*\*|${nehub_gw1_pip}|g" $config_file_local
+sed -i "s|\*\*BGP_ID\*\*|${branch_asn}|g" $config_file_local
+scp $config_file_local ${csrpip}:/${config_file_csr}
+ssh $csrpip <<EOF
+  config t
+    file prompt quiet
+EOF
+ssh $csrpip "copy bootflash:${config_file_csr} running-config"
+ssh $csrpip "wr mem"
+ssh $csrpip "sh ip int b"
+
+else
+# No Cross Connection, so each branch is connected to one VWAN Hub: 2 tunnels
 # Extract info for branch
 # a VPN site might have connections to multiple VWAN HUB VPN Gateways. The region determines the HUB the GW is running in
 region="North Europe"
-branch_psk=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .connectionConfiguration.PSK')
-branch_gw0_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance0')
-branch_gw1_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance1')
-branch_gw0_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance0')
-branch_gw1_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance1')
-echo "Extracted info for $site: Gateway0 $branch_gw0_pip, $branch_gw0_bgp_ip Gateway1 $branch_gw1_pip, $branch_gw1_bgp_ip. PSK $branch_psk"
+hub_psk=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .connectionConfiguration.PSK')
+hub_gw0_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance0')
+hub_gw1_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance1')
+hub_gw0_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance0')
+hub_gw1_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance1')
+echo "Extracted info for $site: Gateway0 $hub_gw0_pip, $hub_gw0_bgp_ip Gateway1 $hub_gw1_pip, $hub_gw1_bgp_ip. PSK $hub_psk"
 
 ### CSR config
 #CSRNET=10.50.0.0
@@ -373,11 +487,11 @@ csr_config_url=$csr2t_config_url
 config_file_csr='branch2_csr.cfg'
 config_file_local='/tmp/branch2_csr.cfg'
 wget $csr_config_url -O $config_file_local
-sed -i "s|\*\*PSK\*\*|${branch_psk}|g" $config_file_local
-sed -i "s|\*\*GW0_Private_IP\*\*|${branch_gw0_bgp_ip}|g" $config_file_local
-sed -i "s|\*\*GW1_Private_IP\*\*|${branch_gw1_bgp_ip}|g" $config_file_local
-sed -i "s|\*\*GW0_Public_IP\*\*|${branch_gw0_pip}|g" $config_file_local
-sed -i "s|\*\*GW1_Public_IP\*\*|${branch_gw1_pip}|g" $config_file_local
+sed -i "s|\*\*PSK\*\*|${hub_psk}|g" $config_file_local
+sed -i "s|\*\*GW0_Private_IP\*\*|${hub_gw0_bgp_ip}|g" $config_file_local
+sed -i "s|\*\*GW1_Private_IP\*\*|${hub_gw1_bgp_ip}|g" $config_file_local
+sed -i "s|\*\*GW0_Public_IP\*\*|${hub_gw0_pip}|g" $config_file_local
+sed -i "s|\*\*GW1_Public_IP\*\*|${hub_gw1_pip}|g" $config_file_local
 sed -i "s|\*\*BGP_ID\*\*|${branch_asn}|g" $config_file_local
 scp $config_file_local ${csrpip}:/${config_file_csr}
 ssh $csrpip <<EOF
@@ -387,3 +501,5 @@ EOF
 ssh $csrpip "copy bootflash:${config_file_csr} running-config"
 ssh $csrpip "wr mem"
 ssh $csrpip "sh ip int b"
+
+fi
