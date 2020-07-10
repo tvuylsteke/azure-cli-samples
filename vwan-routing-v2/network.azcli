@@ -28,6 +28,7 @@ csr4t_config_url="https://raw.githubusercontent.com/tvuylsteke/azure-cli-samples
 ###############################
 # if crossconnection = true then branch offices (VPN) will be connected to both hubs
 crossconnection=true
+loganalytics=true
 
 # Resource Group
 az group create -n $rg -l $loc
@@ -65,6 +66,7 @@ az network vpn-gateway connection create -n OnPrem2toWE --gateway-name we-hub-vp
 fi
 
 # Log Analytics
+if[$loganalytics] then
 logws_name=log$RANDOM
 az monitor log-analytics workspace create -n $logws_name -g $rg
 logws_id=$(az resource list -g $rg -n $logws_name --query '[].id' -o tsv)
@@ -83,6 +85,7 @@ az monitor diagnostic-settings create -n mydiag --resource $ne_hub_vpngw_id --wo
             {"category": "TunnelDiagnosticLog", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false}},
             {"category": "RouteDiagnosticLog", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false}},
             {"category": "IKEDiagnosticLog", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false}}]' >/dev/null
+fi
 
 ################################
 ## Download VWAN configuration
