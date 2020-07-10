@@ -1,10 +1,10 @@
 #kudos to Jose Moreno (github.com/erjosito) for some nice cli tricks
-subscription="MSDN THOVUY P130b"
+subscription="MSDN THOVUY P130"
 az account set --subscription "$subscription"
 
 admin_password=$(az keyvault secret show --id https://setspnvault.vault.azure.net/secrets/local-vm-password/efcdc715a1de4dca90806409730fb638 --query 'value' -o tsv)
 admin_user=azadmin
-rg=az-firewalltest
+rg=az-firewall-with-pl
 vnet=azfw-vnet
 
 azfwsubnet=AzureFirewallSubnet
@@ -96,10 +96,8 @@ az vm create --image ubuntults -g $rg -n $serverVM --admin-password $admin_passw
 az vm create --image ubuntults -g $rg -n $clientVM --admin-password $admin_password --admin-username $admin_user -l westeurope --public-ip-address $clientVM_PIP --vnet-name $vnet --subnet $clientsubnet --os-disk-size 30 --storage-sku Standard_LRS --no-wait
 
 
-
-
-
-
 subnet=exception
 az network vnet subnet create -g $rg -n $subnet --vnet-name $vnet --address-prefix 10.1.3.0/24
 az vm create --image ubuntults -g $rg -n excvm --admin-password $admin_password --admin-username $admin_user -l westeurope --public-ip-address excvm-pip --vnet-name $vnet --subnet $subnet --os-disk-size 30 --storage-sku Standard_LRS --no-wait
+
+

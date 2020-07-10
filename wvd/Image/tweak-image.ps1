@@ -1,3 +1,9 @@
+
+###
+#   Consider using https://github.com/whitscripts/wvd/blob/master/WVD_MasterImage_Prep_Script-public.ps1
+###
+
+
 Write-Host "WVD Image Tweaks"
 Write-Host "https://docs.microsoft.com/en-us/azure/virtual-desktop/set-up-customize-master-image"
 

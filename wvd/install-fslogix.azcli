@@ -1,7 +1,10 @@
 subscription="MSDN THOVUY P130b"
 az account set --subscription "$subscription"
 rg=wvd-spring-update
-vm=tv-2
+vm=tv-3
+
+rg=wvd-spring-update-demo-pool
+vm=demo-0
 
 az vm run-command invoke  --command-id RunPowerShellScript --name $vm -g $rg  \
     --scripts '#Installing FSLogix' \

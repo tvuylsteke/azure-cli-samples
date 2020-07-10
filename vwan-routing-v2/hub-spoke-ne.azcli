@@ -1,0 +1,146 @@
+```
+subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
+admin_password=$(az keyvault secret show --id https://setspnvault.vault.azure.net/secrets/local-vm-password/efcdc715a1de4dca90806409730fb638 --query 'value' -o tsv)
+admin_user=azadmin
+loc="northeurope"
+rg=az-vwan-routing
+
+#select subscription
+az account set --subscription "$subscription"
+
+#Resource Group
+az group create -n $rg -l $loc
+
+hubrange=10.102.11.0/24
+hubserversrange=10.102.11.0/25
+hubfwrange=10.102.11.128/26
+fwIP=10.102.11.132
+nvarange=10.102.11.192/26
+nvaIP=10.102.11.196
+
+spoke1range=10.102.12.0/24
+spoke1serversrange=10.102.12.0/25
+
+spoke2range=10.102.13.0/24
+spoke2serversrange=10.102.13.0/25
+
+#VNET
+#WE VNET
+vnet=ne-hub-vnet
+az network vnet create -g $rg -n $vnet --address-prefix $hubrange --subnet-name servers --subnet-prefix $hubserversrange -l $loc
+az network vnet subnet create -g $rg -n AzureFirewallSubnet --vnet-name $vnet --address-prefix $hubfwrange
+az network vnet subnet create -g $rg -n nva --vnet-name $vnet --address-prefix $nvarange
+
+#WE SPOKE VNET
+vnet=ne-spoke-vnet-01
+az network vnet create -g $rg -n $vnet --address-prefix $spoke1range --subnet-name servers --subnet-prefix $spoke1serversrange -l $loc
+
+#WE SPOKE VNET
+vnet=ne-spoke-vnet-02
+az network vnet create -g $rg -n $vnet --address-prefix $spoke2range --subnet-name servers --subnet-prefix $spoke2serversrange -l $loc
+
+#VNET Peering
+az network vnet peering create -g $rg -n h-to-s1 --vnet-name ne-hub-vnet --remote-vnet ne-spoke-vnet-01 --allow-vnet-access
+az network vnet peering create -g $rg -n s1-to-h --vnet-name ne-spoke-vnet-01 --remote-vnet ne-hub-vnet --allow-forwarded-traffic --allow-vnet-access
+
+az network vnet peering create -g $rg -n h-to-s2 --vnet-name ne-hub-vnet --remote-vnet ne-spoke-vnet-02 --allow-vnet-access
+az network vnet peering create -g $rg -n s2-to-h --vnet-name ne-spoke-vnet-02 --remote-vnet ne-hub-vnet --allow-forwarded-traffic --allow-vnet-access
+
+#test VMs
+name=vm-ne-spoke1
+az vm create --image ubuntults -g $rg -n $name --admin-password $admin_password --admin-username $admin_user -l $loc --public-ip-address "$name-pip" --vnet-name ne-spoke-vnet-01 --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s --no-wait
+name=vm-ne-spoke2
+az vm create --image ubuntults -g $rg -n $name --admin-password $admin_password --admin-username $admin_user -l $loc --public-ip-address "$name-pip" --vnet-name ne-spoke-vnet-02 --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s --no-wait
+#name=vm-ne-hub
+#az vm create --image ubuntults -g $rg -n $name --admin-password $admin_password --admin-username $admin_user -l $loc --public-ip-address "$name-pip" --vnet-name ne-hub-vnet --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s --no-wait
+name=nva-ne-hub
+az network public-ip create --name "$name-pip" --resource-group $rg --idle-timeout 30 --allocation-method Static --loc $loc
+az network nic create --name "$name-nic" -g $rg --subnet nva --vnet ne-hub-vnet --ip-forwarding true --private-ip-address $nvaIP --public-ip-address "$name-pip"  --loc $loc
+az vm create --resource-group $rg --loc $loc --name $name --size Standard_B1s --nics "$name-nic" --image ubuntults --admin-username $admin_user --admin-password $admin_password --os-disk-size 30 --storage-sku Standard_LRS --no-wait
+
+nva_pip=$(az network public-ip show -n "$name-pip" -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $nva_pip >> ~/.ssh/known_hosts
+ssh $nva_pip "sudo sysctl -w net.ipv4.ip_forward=1"
+
+# nva in spoke
+#route tables
+rt=ne-spoke-vnet-01-servers-RT
+az network route-table create -g $rg -n $rt -l $loc
+az network route-table route create -n toWE -g $rg --route-table-name $rt --address-prefix 10.101.0.0/16  --next-hop-type VirtualAppliance  --next-hop-ip-address $nvaIP
+az network vnet subnet update --vnet-name ne-spoke-vnet-01 -n servers -g $rg  --route-table $rt
+
+rt=ne-spoke-vnet-02-servers-RT
+az network route-table create -g $rg -n $rt -l $loc
+az network route-table route create -n toWE -g $rg --route-table-name $rt --address-prefix 10.101.0.0/16  --next-hop-type VirtualAppliance  --next-hop-ip-address $nvaIP
+az network vnet subnet update --vnet-name ne-spoke-vnet-01 -n servers -g $rg  --route-table $rt
+
+#route tables
+#rt=ne-spoke-vnet-01-servers-RT
+#az network route-table create -g $rg -n $rt -l $loc
+#az network route-table route create -n toInternet -g $rg --route-table-name $rt --address-prefix 0.0.0.0/0  --next-hop-type VirtualAppliance  --next-hop-ip-address $fwIP
+#az network vnet subnet update --vnet-name ne-spoke-vnet-01 -n servers -g $rg  --route-table $rt
+
+#rt=ne-spoke-vnet-02-servers-RT
+#az network route-table create -g $rg -n $rt -l $loc --disable-bgp-route-propagation true
+#az network route-table route create -n toInternet -g $rg --route-table-name $rt --address-prefix 0.0.0.0/0  --next-hop-type VirtualAppliance  --next-hop-ip-address $fwIP
+#az network vnet subnet update --vnet-name ne-spoke-vnet-02 -n servers -g $rg  --route-table $rt
+
+
+
+
+#firewall
+fwName=wehubfw
+az network firewall create --name $fwName --resource-group $rg -l $loc
+az network public-ip create -g $rg -n "$fwName-pip"  --allocation-method Static --sku Standard
+az network firewall ip-config create -f $fwName -n ipconfig --public-ip-address "$fwName-pip" -g $rg --vnet-name ne-hub-vnet
+
+#get IP's
+az network public-ip show --name "$fwName-pip" --resource-group $rg
+fwprivaddr="$(az network firewall ip-config list -g $rg -f $fwName --query "[?name=='FW-config'].privateIpAddress" --output tsv)"
+
+az network firewall application-rule create \
+   --collection-name App-Coll01 \
+   --firewall-name $fwName \
+   --name Allow-Google \
+   --protocols Http=80 Https=443 \
+   --resource-group $rg \
+   --target-fqdns www.google.com \
+   --source-addresses 10.0.2.0/24 \
+   --priority 200 \
+   --action Allow
+
+az network firewall network-rule create \
+   --collection-name PrivateTraffic \
+   --destination-addresses 10.0.0.0/8 \
+   --destination-ports '*' \
+   --firewall-name $fwName \
+   --name Allow-All \
+   --protocols Any \
+   --resource-group $rg \
+   --priority 200 \
+   --source-addresses 10.0.0.0/8 \
+   --action Allow
+```
+
+Stop and start the firewall
+
+
+```
+
+$rg = "az-vwan-routing-rg"
+$fw = "wehubfw"
+# Stop an existing firewall
+$azfw = Get-AzFirewall -Name $fw -ResourceGroupName $rg
+$azfw.Deallocate()
+Set-AzFirewall -AzureFirewall $azfw
+
+# Start a firewall
+
+$azfw = Get-AzFirewall -Name "FW Name" -ResourceGroupName "RG Name"
+$vnet = Get-AzVirtualNetwork -ResourceGroupName "RG Name" -Name "VNet Name"
+$publicip = Get-AzPublicIpAddress -Name "Public IP Name" -ResourceGroupName " RG Name"
+$azfw.Allocate($vnet,$publicip)
+Set-AzFirewall -AzureFirewall $azfw
+
+
+```

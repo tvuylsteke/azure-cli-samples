@@ -1,0 +1,156 @@
+subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
+#select subscription
+az account set --subscription "$subscription"
+# depedencies
+az vm image accept-terms --urn cisco:cisco-csr-1000v:16_10-byol:16.10.120190108 --subscription "$subscription"
+publisher=cisco
+offer=cisco-csr-1000v
+sku=16_12-byol
+version=$(az vm image list -p $publisher -f $offer -s $sku --all --query '[0].version' -o tsv)
+
+#variables
+rg=az-vwan-routing
+loc="westeurope"
+admin_password=$(az keyvault secret show --id https://setspnvault.vault.azure.net/secrets/local-vm-password/efcdc715a1de4dca90806409730fb638 --query 'value' -o tsv)
+admin_user=azadmin
+csr2t_config_url="https://raw.githubusercontent.com/tvuylsteke/azure-wan-lab/master/csr_config_2tunnels.txt"
+csr4t_config_url="https://raw.githubusercontent.com/tvuylsteke/azure-wan-lab/master/csr_config_4tunnels.txt"
+
+# Resource Group
+az group create -n $rg -l $loc
+
+## Branch 1
+prefix=onprem1
+vnet=$prefix"-vnet"
+vnetrange=10.50.0.0/16
+subnet1=servers
+serverrange=10.50.10.0/24
+subnet2=csrnet
+firewallrange=10.50.1.0/24
+fwIP=10.50.1.5
+
+### VNET
+az network vnet create --resource-group $rg --name $vnet --loc $loc --address-prefixes $vnetrange --subnet-name $subnet1 --subnet-prefix $serverrange
+az network vnet subnet create --address-prefix $firewallrange --name $subnet2 --resource-group $rg --vnet-name $vnet
+###  CSR
+vmname=$prefix"-VM" 
+pipname=$prefix"-VMpip"
+nicname=$prefix"-VMnic"
+az network public-ip create --name $pipname --resource-group $rg --idle-timeout 30 --allocation-method Static --loc $loc
+az network nic create --name $nicname -g $rg --subnet $subnet2 --vnet $vnet --ip-forwarding true --private-ip-address $fwIP --public-ip-address $pipname --loc $loc
+az vm create --resource-group $rg --loc $loc --name $prefix"-CSR" --size Standard_D2_v2 --nics $nicname --image ${publisher}:${offer}:${sku}:${version} --admin-username $admin_user --generate-ssh-keys --no-wait
+pip=$(az network public-ip show -n $pipname -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+### test VM
+vmname=$prefix"-VM" 
+pipname=$prefix"-VMpip"
+nicname=$prefix"-VMnic"
+az network public-ip create --name $pipname --resource-group $rg --loc $loc --allocation-method Dynamic
+az network nic create --resource-group $rg -n $nicname --loc $loc --subnet $subnet1 --vnet-name $vnet --public-ip-address $pipname
+az vm create -n $vmanme -g $rg --image UbuntuLTS --admin-username $admin_user --generate-ssh-keys --nics $nicname--size Standard_B1s --no-wait
+pip=$(az network public-ip show -n $pipname -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+### Route Table
+rt="$vnet-servers-RT"
+az network route-table create --name $rt --resource-group $rg --loc $loc
+az network route-table route create -n DefaultRoute -g $rg --route-table-name $rt --address-prefix 10.0.0.0/8  --next-hop-type VirtualAppliance  --next-hop-ip-address $fwIP
+az network vnet subnet update --name $subnet1 --vnet-name $vnet --resource-group $rg --route-table $rt
+
+### CSR config
+CSRNET=10.50.0.0
+CSRMASK=255.255.0.0
+CSRGW=10.50.1.1
+BRANCHASN=65050
+
+# hub 1
+VWANHUB1PIP1=20.50.13.156
+VWANHUB1PIP2=20.50.12.217
+VWANHUB1BGPPEERIP1=10.101.10.13
+VWANHUB1BGPPEERIP2=10.101.10.13
+# hub 2
+VWANHUB2PIP1=
+VWANHUB2PIP2=
+VWANHUB2BGPPEERIP1=
+VWANHUB2BGPPEERIP2=
+
+csr_config_url=$csr2t_config_url
+config_file_csr='branch2_csr.cfg'
+config_file_local='/tmp/branch2_csr.cfg'
+wget $csr_config_url -O $config_file_local
+envsubst < $config_file_local
+#sed -i "s|\*\*PSK\*\*|${branch2_psk}|g" $config_file_local
+#sed -i "s|\*\*GW0_Private_IP\*\*|${branch2_gw0_bgp_ip}|g" $config_file_local
+#sed -i "s|\*\*GW1_Private_IP\*\*|${branch2_gw1_bgp_ip}|g" $config_file_local
+#sed -i "s|\*\*GW0_Public_IP\*\*|${branch2_gw0_pip}|g" $config_file_local
+#sed -i "s|\*\*GW1_Public_IP\*\*|${branch2_gw1_pip}|g" $config_file_local
+#sed -i "s|\*\*BGP_ID\*\*|${branch2_asn}|g" $config_file_local
+scp $config_file_local ${branch2_ip}:/${config_file_csr}
+ssh $branch2_ip <<EOF
+  config t
+    file prompt quiet
+EOF
+ssh $branch2_ip "copy bootflash:${config_file_csr} running-config"
+ssh $branch2_ip "wr mem"
+ssh $branch2_ip "sh ip int b"
+
+
+# Get VWAN IPs
+
+# Download configuration to find out GWs public IP addresses
+# Create storage account and SAS
+storage_account=vpnconfigs$RANDOM 
+container_name=configs
+az storage account create -n $storage_account -g $rg -l $location1 --sku Standard_LRS
+az storage container create -n $container_name --account-name $storage_account
+end_time=`date -u -d "240 minutes" '+%Y-%m-%dT%H:%MZ'`
+sas=$(az storage container generate-sas -n $container_name --account-name $storage_account --permissions dlrw --expiry $end_time -o tsv)
+account_url=$(az storage account show -n $storage_account -g $rg --query primaryEndpoints.blob -o tsv)
+# hub1:
+blob_name=vpnconfig1.json
+file_name="/tmp/${blob_name}"
+storage_url=${account_url}${container_name}"/"${blob_name}"?"${sas}
+az network vpn-site download --vwan-name $vwan1 -g $rg --vpn-sites hub2 --output-blob-sas-url $storage_url
+az storage blob download --account-name $storage_account -c $container_name -n $blob_name --sas-token $sas -f $file_name
+site=hub2
+hub1_psk=$(cat $file_name | jq -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[].connectionConfiguration.PSK')
+hub1_gw0_pip=$(cat $file_name | jq -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[].gatewayConfiguration.IpAddresses.Instance0')
+hub1_gw1_pip=$(cat $file_name | jq -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[].gatewayConfiguration.IpAddresses.Instance1')
+echo "Extracted info for $site: Gateway0 $hub1_gw0_pip. Gateway1 $hub1_gw1_pip. PSK $hub1_psk"
+
+
+# configure CSR as needed
+# local network
+
+nva_pip=$(az network public-ip show -n $prefix"-CSRpip" -g $rg --query ipAddress -o tsv)
+
+CSRNET=10.50.0.0
+CSRMASK=255.255.0.0
+CSRGW=10.50.1.1
+
+BRANCHASN=65050
+
+# hub 1
+VWANHUB1PIP1=20.50.13.156
+VWANHUB1PIP2=20.50.12.217
+VWANHUB1BGPPEERIP1=10.101.10.13
+VWANHUB1BGPPEERIP2=10.101.10.13
+# hub 2
+VWANHUB2PIP1=
+VWANHUB2PIP2=
+VWANHUB2BGPPEERIP1=
+VWANHUB2BGPPEERIP2=
+
+# 4 tunnels
+read -r -d '' CONFIG << EOM
+
+EOM
+
+# 2 tunnels
+read -r -d '' CONFIG << EOM
+
+EOM
+
+echo "$CONFIG"
+
+ssh $nva_pip "copy bootflash:${CONFIG} running-config"
+ssh $nva_pip "wr mem"
