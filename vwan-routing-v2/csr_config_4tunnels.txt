@@ -9,30 +9,30 @@ crypto ikev2 policy azure-policy
   exit
 !
 crypto ikev2 keyring azure-keyring
-  peer $VWANHUB1PIP1
-    address $VWANHUB1PIP1
-    pre-shared-key Microsoft123!
+  peer **GW0_Public_IP**
+    address **GW0_Public_IP**
+    pre-shared-key **PSK**
     exit
-  peer $VWANHUB1PIP2
-    address $VWANHUB1PIP2
-    pre-shared-key Microsoft123!
+  peer **GW1_Public_IP**
+    address **GW1_Public_IP**
+    pre-shared-key **PSK**
     exit
-  peer $VWANHUB2PIP1
-    address $VWANHUB2PIP1
-    pre-shared-key Microsoft123!
+  peer **GW2_Public_IP**
+    address **GW2_Public_IP**
+    pre-shared-key **PSK**
     exit
-  peer $VWANHUB2PIP2
-    address $VWANHUB2PIP2
-    pre-shared-key Microsoft123!
+  peer **GW3_Public_IP**
+    address **GW3_Public_IP**
+    pre-shared-key **PSK**
     exit
   exit
 !
 crypto ikev2 profile azure-profile
   match address local interface GigabitEthernet1
-  match identity remote address $VWANHUB1PIP1 255.255.255.255
-  match identity remote address $VWANHUB1PIP2 255.255.255.255
-  match identity remote address $VWANHUB2PIP1 255.255.255.255
-  match identity remote address $VWANHUB2PIP2 255.255.255.255
+  match identity remote address **GW0_Public_IP** 255.255.255.255
+  match identity remote address **GW1_Public_IP** 255.255.255.255
+  match identity remote address **GW2_Public_IP** 255.255.255.255
+  match identity remote address **GW3_Public_IP** 255.255.255.255
   authentication remote pre-share
   authentication local pre-share
   keyring local azure-keyring
@@ -54,7 +54,7 @@ interface Tunnel0
  ip tcp adjust-mss 1350
  tunnel source GigabitEthernet1
  tunnel mode ipsec ipv4
- tunnel destination $VWANHUB1PIP1
+ tunnel destination **GW0_Public_IP**
  tunnel protection ipsec profile azure-vti
 exit
 !
@@ -63,50 +63,50 @@ interface Tunnel1
  ip tcp adjust-mss 1350
  tunnel source GigabitEthernet1
  tunnel mode ipsec ipv4
- tunnel destination $VWANHUB1PIP2
+ tunnel destination **GW1_Public_IP**
  tunnel protection ipsec profile azure-vti
 exit
-
+!
 interface Tunnel2
  ip unnumbered GigabitEthernet1 
  ip tcp adjust-mss 1350
  tunnel source GigabitEthernet1
  tunnel mode ipsec ipv4
- tunnel destination $VWANHUB2PIP1
+ tunnel destination **GW2_Public_IP**
  tunnel protection ipsec profile azure-vti
 exit
-
+!
 interface Tunnel3
  ip unnumbered GigabitEthernet1 
  ip tcp adjust-mss 1350
  tunnel source GigabitEthernet1
  tunnel mode ipsec ipv4
- tunnel destination $VWANHUB2PIP2
+ tunnel destination **GW3_Public_IP**
  tunnel protection ipsec profile azure-vti
 exit
+
 !
-router bgp $BRANCHASN
+router bgp **BGP_ID**
  bgp router-id interface GigabitEthernet1
  bgp log-neighbor-changes
- network $CSRNET mask $CSRMASK
- neighbor $VWANHUB1BGPPEERIP2 remote-as 65515
- neighbor $VWANHUB1BGPPEERIP2 ebgp-multihop 5
- neighbor $VWANHUB1BGPPEERIP2 update-source GigabitEthernet1
- neighbor $VWANHUB1BGPPEERIP1 remote-as 65515
- neighbor $VWANHUB1BGPPEERIP1 ebgp-multihop 5
- neighbor $VWANHUB1BGPPEERIP1 update-source GigabitEthernet1
- neighbor $VWANHUB2BGPPEERIP1 remote-as 65515
- neighbor $VWANHUB2BGPPEERIP1 ebgp-multihop 5
- neighbor $VWANHUB2BGPPEERIP1 update-source GigabitEthernet1
- neighbor $VWANHUB2BGPPEERIP2 remote-as 65515
- neighbor $VWANHUB2BGPPEERIP2 ebgp-multihop 5
- neighbor $VWANHUB2BGPPEERIP2 update-source GigabitEthernet1
+ neighbor **GW0_Private_IP** remote-as 65515
+ neighbor **GW0_Private_IP** ebgp-multihop 5
+ neighbor **GW0_Private_IP** update-source GigabitEthernet1
+ neighbor **GW1_Private_IP** remote-as 65515
+ neighbor **GW1_Private_IP** ebgp-multihop 5
+ neighbor **GW1_Private_IP** update-source GigabitEthernet1
+ neighbor **GW2_Private_IP** remote-as 65515
+ neighbor **GW2_Private_IP** ebgp-multihop 5
+ neighbor **GW2_Private_IP** update-source GigabitEthernet1
+ neighbor **GW3_Private_IP** remote-as 65515
+ neighbor **GW3_Private_IP** ebgp-multihop 5
+ neighbor **GW3_Private_IP** update-source GigabitEthernet1
 !
-ip route $CSRNET $CSRMASK $CSRGW
-ip route $VWANHUB1BGPPEERIP1 255.255.255.255 Tunnel0
-ip route $VWANHUB1BGPPEERIP2 255.255.255.255 Tunnel1
-ip route $VWANHUB2BGPPEERIP1 255.255.255.255 Tunnel2
-ip route $VWANHUB2BGPPEERIP2 255.255.255.255 Tunnel3
+ip route **GW0_Private_IP** 255.255.255.255 Tunnel0
+ip route **GW1_Private_IP** 255.255.255.255 Tunnel1
+ip route **GW2_Private_IP** 255.255.255.255 Tunnel2
+ip route **GW3_Private_IP** 255.255.255.255 Tunnel3
 !
 end
 !
+wr mem
