@@ -1,0 +1,121 @@
+#
+#
+#  VWAN + 2 hubs + 3 VNETS on each
+#
+#
+subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
+#select subscription
+az account set --subscription "$subscription"
+# depedencies
+#VWAN
+az extension add --name virtual-wan
+
+#variables
+rg=az-vwan-routing3
+loc="westcentralus"
+admin_password=$(az keyvault secret show --id https://setspnvault.vault.azure.net/secrets/local-vm-password/efcdc715a1de4dca90806409730fb638 --query 'value' -o tsv)
+admin_user=azadmin
+
+# Resource Group
+az group create -n $rg -l $loc
+
+################################
+## VWAN Config
+################################
+vwan=vwan-routing-lab
+az network vwan create -n $vwan -g $rg -l $loc
+loc1="westcentralus"
+loc2="centralus"
+
+## VWAN WE-HUB
+az network vhub create -n we-hub --address-prefix 192.168.1.0/24 -g $rg --vwan $vwan -l $loc1
+
+## VWAN NE-HUB
+az network vhub create -n ne-hub --address-prefix 192.168.2.0/24 -g $rg --vwan $vwan -l $loc2
+
+################################
+## WE spokes
+################################
+spoke1range=10.1.1.0/24
+spoke1serversrange=10.1.1.0/25
+
+spoke2range=10.1.2.0/24
+spoke2serversrange=10.1.2.0/25
+
+spoke3range=10.1.3.0/24
+spoke3serversrange=10.1.3.0/25
+
+spoke4range=10.1.4.0/24
+spoke4serversrange=10.1.4.0/25
+
+az network vnet create -n we-spoke-vnet-01 --address-prefix $spoke1range --subnet-prefix $spoke1serversrange --subnet-name servers -l $loc -g $rg
+az network vnet create -n we-spoke-vnet-02 --address-prefix $spoke2range --subnet-prefix $spoke2serversrange --subnet-name servers -l $loc -g $rg
+az network vnet create -n we-spoke-vnet-03 --address-prefix $spoke3range --subnet-prefix $spoke3serversrange --subnet-name servers -l $loc -g $rg
+az network vnet create -n we-spoke-vnet-04 --address-prefix $spoke4range --subnet-prefix $spoke4serversrange --subnet-name servers -l $loc -g $rg
+
+### Test VMs
+az vm create -n vm-we-spoke1 --public-ip-address vm-we-spoke1-pip --vnet-name we-spoke-vnet-01 --image ubuntults -g $rg --generate-ssh-keys --admin-username $admin_user -l $loc --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s #--no-wait
+pip=$(az network public-ip show -n vm-we-spoke1-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+az vm create -n vm-we-spoke2 --public-ip-address vm-we-spoke2-pip --vnet-name we-spoke-vnet-02 --image ubuntults -g $rg --generate-ssh-keys --admin-username $admin_user -l $loc --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s #--no-wait
+pip=$(az network public-ip show -n vm-we-spoke2-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+        
+az vm create -n vm-we-spoke3 --public-ip-address vm-we-spoke3-pip --vnet-name we-spoke-vnet-03 --image ubuntults -g $rg --generate-ssh-keys --admin-username $admin_user -l $loc --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s #--no-wait
+pip=$(az network public-ip show -n vm-we-spoke3-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+az vm create -n vm-we-spoke4 --public-ip-address vm-we-spoke4-pip --vnet-name we-spoke-vnet-04 --image ubuntults -g $rg --generate-ssh-keys --admin-username $admin_user -l $loc --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s #--no-wait
+pip=$(az network public-ip show -n vm-we-spoke4-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+###   Connect WE hub and Spokes  
+weSpoke1VnetId=$(az network vnet show --resource-group $rg --name we-spoke-vnet-01 --query id --out tsv)
+weSpoke2VnetId=$(az network vnet show --resource-group $rg --name we-spoke-vnet-02 --query id --out tsv)
+weSpoke3VnetId=$(az network vnet show --resource-group $rg --name we-spoke-vnet-03 --query id --out tsv)
+weSpoke4VnetId=$(az network vnet show --resource-group $rg --name we-spoke-vnet-04 --query id --out tsv)
+
+az network vhub connection create -n we-spoke-vnet-01 --remote-vnet $weSpoke1VnetId -g $rg --vhub-name we-hub
+az network vhub connection create -n we-spoke-vnet-02 --remote-vnet $weSpoke2VnetId -g $rg --vhub-name we-hub
+az network vhub connection create -n we-spoke-vnet-03 --remote-vnet $weSpoke3VnetId -g $rg --vhub-name we-hub
+az network vhub connection create -n we-spoke-vnet-04 --remote-vnet $weSpoke4VnetId -g $rg --vhub-name we-hub
+
+
+################################
+## Hub and Spoke NE
+################################
+spoke1range=10.2.1.0/24
+spoke1serversrange=10.2.1.0/25
+
+spoke2range=10.2.2.0/24
+spoke2serversrange=10.2.2.0/25
+
+spoke3range=10.2.3.0/24
+spoke3serversrange=10.2.3.0/25
+
+az network vnet create -n ne-spoke-vnet-01 --address-prefix $spoke1range --subnet-prefix $spoke1serversrange --subnet-name servers -l $loc2 -g $rg
+az network vnet create -n ne-spoke-vnet-02 --address-prefix $spoke2range --subnet-prefix $spoke2serversrange --subnet-name servers -l $loc2 -g $rg
+az network vnet create -n ne-spoke-vnet-03 --address-prefix $spoke3range --subnet-prefix $spoke3serversrange --subnet-name servers -l $loc2 -g $rg
+
+### Test VMs
+az vm create -n vm-ne-spoke1 --public-ip-address vm-ne-spoke1-pip --vnet-name ne-spoke-vnet-01 --image ubuntults -g $rg --generate-ssh-keys --admin-username $admin_user -l $loc2 --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s #--no-wait
+pip=$(az network public-ip show -n vm-ne-spoke1-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+az vm create -n vm-ne-spoke2 --public-ip-address vm-ne-spoke2-pip --vnet-name ne-spoke-vnet-02 --image ubuntults -g $rg --generate-ssh-keys --admin-username $admin_user -l $loc2 --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s #--no-wait
+pip=$(az network public-ip show -n vm-ne-spoke2-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+az vm create -n vm-ne-spoke3 --public-ip-address vm-ne-spoke3-pip --vnet-name ne-spoke-vnet-03 --image ubuntults -g $rg --generate-ssh-keys --admin-username $admin_user -l $loc2 --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s #--no-wait
+pip=$(az network public-ip show -n vm-ne-spoke3-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+###   Connect WE hub and Spokes 
+neSpoke1VnetId=$(az network vnet show --resource-group $rg --name ne-spoke-vnet-01 --query id --out tsv)
+neSpoke2VnetId=$(az network vnet show --resource-group $rg --name ne-spoke-vnet-02 --query id --out tsv)
+neSpoke3VnetId=$(az network vnet show --resource-group $rg --name ne-spoke-vnet-03 --query id --out tsv)
+
+az network vhub connection create -n ne-spoke-vnet-01 --remote-vnet $neSpoke1VnetId -g $rg --vhub-name ne-hub
+az network vhub connection create -n ne-spoke-vnet-02 --remote-vnet $neSpoke2VnetId -g $rg --vhub-name ne-hub
+az network vhub connection create -n ne-spoke-vnet-03 --remote-vnet $neSpoke3VnetId -g $rg --vhub-name ne-hub

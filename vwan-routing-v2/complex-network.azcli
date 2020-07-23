@@ -1,6 +1,9 @@
 #
 # Lots of inspiration found in https://github.com/erjosito/azcli
 #
+#  VWAN + 2 hubs + 2 branches + 2x hub/spoke
+#
+#
 
 subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
 #select subscription
