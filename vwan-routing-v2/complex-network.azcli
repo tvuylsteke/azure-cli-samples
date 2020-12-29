@@ -19,7 +19,7 @@ az vm image terms accept --urn  ${publisher}:${offer}:${sku}:${version} --subscr
 az extension add --name virtual-wan
 
 #variables
-rg=az-vwan-routing2
+rg=az-vwan-routx
 loc="westeurope"
 admin_password=$(az keyvault secret show --id https://setspnvault.vault.azure.net/secrets/local-vm-password/efcdc715a1de4dca90806409730fb638 --query 'value' -o tsv)
 admin_user=azadmin
@@ -56,7 +56,7 @@ az network vpn-gateway create -n ne-hub-vpngw --vhub ne-hub --scale-unit 1 -l $l
 az network vpn-site create -n OnPrem1CSR --asn 65001  --ip-address 1.2.3.4 --bgp-peering-address 5.6.7.8 -g $rg --device-model CSR --device-vendor Cisco --virtual-wan $vwan
 az network vpn-gateway connection create -n OnPrem1toWE --gateway-name we-hub-vpngw --remote-vpn-site OnPrem1CSR -g $rg --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password"
 # Connect Branch onprem1 to NE HUB (crossed connection)
-if[$crossconnection] then
+if [ "$crossconnection" = "true" ]; then
 az network vpn-gateway connection create -n OnPrem1toNE --gateway-name ne-hub-vpngw --remote-vpn-site OnPrem1CSR -g $rg --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password"
 fi
 
@@ -64,12 +64,12 @@ fi
 az network vpn-site create -n OnPrem2CSR --asn 65002  --ip-address 11.12.13.14 --bgp-peering-address 15.16.17.18 -g $rg --device-model CSR --device-vendor Cisco --virtual-wan $vwan
 az network vpn-gateway connection create -n OnPrem2toNE --gateway-name ne-hub-vpngw --remote-vpn-site OnPrem2CSR -g $rg --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password"
 # Connect Branch onprem1 to WE HUB (crossed connection)
-if[$crossconnection] then
+if [ "$crossconnection" = "true" ]; then
 az network vpn-gateway connection create -n OnPrem2toWE --gateway-name we-hub-vpngw --remote-vpn-site OnPrem2CSR -g $rg  --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password"
 fi
 
 # Log Analytics
-if[$loganalytics] then
+if [ "$loganalytics" = "true" ]; then
 logws_name=log$RANDOM
 az monitor log-analytics workspace create -n $logws_name -g $rg
 logws_id=$(az resource list -g $rg -n $logws_name --query '[].id' -o tsv)
@@ -112,18 +112,18 @@ az storage blob download --account-name $storage_account -c $container_name -n $
 ################################
 ## Hub and Spoke WE
 ################################
-hubrange=10.101.11.0/24
-hubserversrange=10.101.11.0/25
-hubfwrange=10.101.11.128/26
-fwIP=10.101.11.132
-nvarange=10.101.11.192/26
-nvaIP=10.101.11.196
+hubrange=10.1.0.0/24
+hubserversrange=10.1.0.0/25
+hubfwrange=10.1.0.128/26
+fwIP=10.1.0.132
+nvarange=10.1.0.192/26
+nvaIP=10.1.0.196
 
-spoke1range=10.101.12.0/24
-spoke1serversrange=10.101.12.0/25
+spoke1range=10.1.1.0/24
+spoke1serversrange=10.1.1.0/25
 
-spoke2range=10.101.13.0/24
-spoke2serversrange=10.101.13.0/25
+spoke2range=10.1.2.0/24
+spoke2serversrange=10.1.2.0/25
 
 ### WE VNET
 vnet=we-hub-vnet
@@ -165,13 +165,17 @@ ssh $nva_pip "sudo sysctl -w net.ipv4.ip_forward=1"
 ### route tables
 rt=we-spoke-vnet-01-servers-RT
 az network route-table create -g $rg -n $rt -l $loc
-az network route-table route create -n toNE -g $rg --route-table-name $rt --address-prefix 10.102.0.0/16  --next-hop-type VirtualAppliance  --next-hop-ip-address $nvaIP
+az network route-table route create -n toNE -g $rg --route-table-name $rt --address-prefix 0.0.0.0/0  --next-hop-type VirtualAppliance  --next-hop-ip-address $nvaIP
+my_ip=$(curl -s4 ifconfig.co)
+az network route-table route create -n clientIP --route-table-name $rt -g $rg --next-hop-type Internet --address-prefix "$my_ip/32"
 az network vnet subnet update --vnet-name we-spoke-vnet-01 -n servers -g $rg  --route-table $rt
 
 rt=we-spoke-vnet-02-servers-RT
 az network route-table create -g $rg -n $rt -l $loc
-az network route-table route create -n toNE -g $rg --route-table-name $rt --address-prefix 10.102.0.0/16  --next-hop-type VirtualAppliance  --next-hop-ip-address $nvaIP
-az network vnet subnet update --vnet-name we-spoke-vnet-01 -n servers -g $rg  --route-table $rt
+az network route-table route create -n toNE -g $rg --route-table-name $rt --address-prefix 0.0.0.0/0  --next-hop-type VirtualAppliance  --next-hop-ip-address $nvaIP
+my_ip=$(curl -s4 ifconfig.co)
+az network route-table route create -n clientIP --route-table-name $rt -g $rg --next-hop-type Internet --address-prefix "$my_ip/32"
+az network vnet subnet update --vnet-name we-spoke-vnet-02 -n servers -g $rg  --route-table $rt
 
               
 ###   Connect WE hub and Spoke  
@@ -188,18 +192,18 @@ az network vhub connection create -n we-hub-vnet --remote-vnet $weHubVnetId -g $
 ## Hub and Spoke NE
 ################################
 loc2="northeurope"
-hubrange=10.102.11.0/24
-hubserversrange=10.102.11.0/25
-hubfwrange=10.102.11.128/26
-fwIP=10.102.11.132
-nvarange=10.102.11.192/26
-nvaIP=10.102.11.196
+hubrange=10.2.0.0/24
+hubserversrange=10.2.0.0/25
+hubfwrange=10.2.0.128/26
+fwIP=10.2.0.132
+nvarange=10.2.0.192/26
+nvaIP=10.2.0.196
 
-spoke1range=10.102.12.0/24
-spoke1serversrange=10.102.12.0/25
+spoke1range=10.2.1.0/24
+spoke1serversrange=10.2.1.0/25
 
-spoke2range=10.102.13.0/24
-spoke2serversrange=10.102.13.0/25
+spoke2range=10.2.2.0/24
+spoke2serversrange=10.2.2.0/25
 
 ### WE VNET
 vnet=ne-hub-vnet
@@ -242,13 +246,17 @@ ssh $nva_pip "sudo sysctl -w net.ipv4.ip_forward=1"
 ### route tables
 rt=ne-spoke-vnet-01-servers-RT
 az network route-table create -g $rg -n $rt -l $loc2
-az network route-table route create -n toNE -g $rg --route-table-name $rt --address-prefix 10.102.0.0/16  --next-hop-type VirtualAppliance  --next-hop-ip-address $nvaIP
+az network route-table route create -n toNE -g $rg --route-table-name $rt --address-prefix 0.0.0.0/0  --next-hop-type VirtualAppliance  --next-hop-ip-address $nvaIP
+my_ip=$(curl -s4 ifconfig.co)
+az network route-table route create -n clientIP --route-table-name $rt -g $rg --next-hop-type Internet --address-prefix "$my_ip/32"
 az network vnet subnet update --vnet-name ne-spoke-vnet-01 -n servers -g $rg  --route-table $rt
 
 rt=ne-spoke-vnet-02-servers-RT
 az network route-table create -g $rg -n $rt -l $loc2
-az network route-table route create -n toNE -g $rg --route-table-name $rt --address-prefix 10.102.0.0/16  --next-hop-type VirtualAppliance  --next-hop-ip-address $nvaIP
-az network vnet subnet update --vnet-name ne-spoke-vnet-01 -n servers -g $rg  --route-table $rt
+az network route-table route create -n toNE -g $rg --route-table-name $rt --address-prefix 0.0.0.0/0  --next-hop-type VirtualAppliance  --next-hop-ip-address $nvaIP
+my_ip=$(curl -s4 ifconfig.co)
+az network route-table route create -n clientIP --route-table-name $rt -g $rg --next-hop-type Internet --address-prefix "$my_ip/32"
+az network vnet subnet update --vnet-name ne-spoke-vnet-02 -n servers -g $rg  --route-table $rt
 
 ###   Connect WE hub and Spoke  
 neHubVnetId=$(az network vnet show --resource-group $rg --name ne-hub-vnet --query id --out tsv)
@@ -268,6 +276,11 @@ branch_asn=65050
 prefix=onprem1
 vnet=$prefix"-vnet"
 vnetrange=10.50.0.0/16
+#required to configure the VNET as a known network in the CSR
+branchrange=10.50.0.0
+branchmask=255.255.0.0
+branchgw=10.50.1.1
+
 subnet1=servers
 serverrange=10.50.10.0/24
 subnet2=csrnet
@@ -299,7 +312,7 @@ az network vnet subnet update --name $subnet1 --vnet-name $vnet --resource-group
 az network vpn-site update -n $site --ip-address $csrpip --asn $branch_asn --bgp-peering-address $fwIP --virtual-wan $vwan -g $rg 
 
 # Cross Connection means each branch is connected to 2 VWAN Hubs to 2x2=4 tunnels
-if[$crossconnection] then
+if [ "$crossconnection" = "true" ]; then
 # Extract info for branch
 # a VPN site might have connections to multiple VWAN HUB VPN Gateways. The region determines the HUB the GW is running in
 region="West Europe"
@@ -347,6 +360,20 @@ ssh $csrpip "copy bootflash:${config_file_csr} running-config"
 ssh $csrpip "wr mem"
 ssh $csrpip "sh ip int b"
 
+# enable configure AS Path Prepending
+#basically you're saying  on the router 65050 (branch 1), make sure to add more AS to the path over hub 2 so that hub 1 remains the preferred way to access this branch
+ssh $csrpip <<EOF
+  config t    
+    router bgp $branch_asn
+      neighbor $nehub_gw0_bgp_ip route-map PREPEND out
+      neighbor $nehub_gw1_bgp_ip route-map PREPEND out
+    !    
+    route-map PREPEND
+	    set as-path prepend $branch_asn $branch_asn $branch_asn
+    !
+EOF
+ssh $csrpip "wr mem"
+
 else
 # No Cross Connection, so each branch is connected to one VWAN Hub: 2 tunnels
 # Extract info for branch
@@ -385,14 +412,31 @@ ssh $csrpip "sh ip int b"
 
 fi
 
+# enable the local range of the branch to be advertised to the VNET
+
+ssh $csrpip <<EOF
+  config t
+    ip route $branchrange $branchmask $branchgw
+    router bgp $branch_asn
+      redistribute connected
+    !    
+EOF
+ssh $csrpip "wr mem"
+
+
 ################################
 ## Branch 2
 ################################
 site=OnPrem2CSR
-branch_asn=65050
+branch_asn=65060
 prefix=onprem2
 vnet=$prefix"-vnet"
 vnetrange=10.60.0.0/16
+#required to configure the VNET as a known network in the CSR
+branchrange=10.60.0.0
+branchmask=255.255.0.0
+branchgw=10.60.1.1
+
 subnet1=servers
 serverrange=10.60.10.0/24
 subnet2=csrnet
@@ -424,7 +468,7 @@ az network vnet subnet update --name $subnet1 --vnet-name $vnet --resource-group
 az network vpn-site update -n $site --ip-address $csrpip --asn $branch_asn --bgp-peering-address $fwIP --virtual-wan $vwan -g $rg 
 
 # Cross Connection means each branch is connected to 2 VWAN Hubs to 2x2=4 tunnels
-if[$crossconnection] then
+if [ "$crossconnection" = "true" ]; then
 # Extract info for branch
 # a VPN site might have connections to multiple VWAN HUB VPN Gateways. The region determines the HUB the GW is running in
 region="West Europe"
@@ -455,7 +499,7 @@ config_file_local='/tmp/branch2_csr.cfg'
 wget $csr_config_url -O $config_file_local
 sed -i "s|\*\*PSK\*\*|${wehub_psk}|g" $config_file_local
 sed -i "s|\*\*GW0_Private_IP\*\*|${wehub_gw0_bgp_ip}|g" $config_file_local
-sed -i "s|\*\*GW1_Private_IP\*\*|${wehub_gw0_bgp_ip}|g" $config_file_local
+sed -i "s|\*\*GW1_Private_IP\*\*|${wehub_gw1_bgp_ip}|g" $config_file_local
 sed -i "s|\*\*GW2_Private_IP\*\*|${nehub_gw0_bgp_ip}|g" $config_file_local
 sed -i "s|\*\*GW3_Private_IP\*\*|${nehub_gw1_bgp_ip}|g" $config_file_local
 sed -i "s|\*\*GW0_Public_IP\*\*|${wehub_gw0_pip}|g" $config_file_local
@@ -471,6 +515,20 @@ EOF
 ssh $csrpip "copy bootflash:${config_file_csr} running-config"
 ssh $csrpip "wr mem"
 ssh $csrpip "sh ip int b"
+
+# enable configure AS Path Prepending
+#basically you're saying  on the router 65050 (branch 1), make sure to add more AS to the path over hub 2 so that hub 1 remains the preferred way to access this branch
+ssh $csrpip <<EOF
+  config t    
+    router bgp $branch_asn
+      neighbor $wehub_gw0_bgp_ip route-map PREPEND out
+      neighbor $wehub_gw1_bgp_ip route-map PREPEND out
+    !    
+    route-map PREPEND
+	    set as-path prepend $branch_asn $branch_asn $branch_asn
+    !
+EOF
+ssh $csrpip "wr mem"
 
 else
 # No Cross Connection, so each branch is connected to one VWAN Hub: 2 tunnels
@@ -509,3 +567,43 @@ ssh $csrpip "wr mem"
 ssh $csrpip "sh ip int b"
 
 fi
+
+# enable the local range of the branch to be advertised to the VNET
+
+ssh $csrpip <<EOF
+  config t
+    ip route $branchrange $branchmask $branchgw
+    router bgp $branch_asn
+      redistribute connected
+    !    
+EOF
+ssh $csrpip "wr mem"
+
+
+# CSR debugging
+
+show ip int brief
+
+show crypto ike sa
+sh crypto ipsec sa
+
+sh ip bgp sum
+sh ip bgp neighbors 10.101.2.254
+sh ip bgp
+sh ip route bgp
+sh ip bgp neighbors 10.101.2.254 advertised-routessho
+
+#Restart BGP thingy
+clear ip bgp *
+
+# AS path prepending
+#basically you're saying  on the router 65050 (branch 1), make sure to add more AS to the path over hub 2
+router bgp 65050
+neighbor 192.168.2.12 route-map PREPEND out
+neighbor 192.168.2.13 route-map PREPEND out
+!
+route-map PREPEND
+	set as-path prepend 65050 65050 65050
+!
+
+

@@ -1,0 +1,383 @@
+#
+# Lots of inspiration found in https://github.com/erjosito/azcli
+#
+#  VWAN + 2 hubs + 2 branches + 2x hub/spoke
+#
+#
+subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
+#select subscription
+az account set --subscription "$subscription"
+#VWAN
+az extension add --name virtual-wan
+
+#variables
+rg=az-vwan-test
+loc="westeurope"
+admin_password=$(az keyvault secret show --id https://setspnvault.vault.azure.net/secrets/local-vm-password/efcdc715a1de4dca90806409730fb638 --query 'value' -o tsv)
+admin_user=azadmin
+
+# Resource Group
+az group create -n $rg -l $loc
+
+################################
+## VWAN Config
+################################
+vwan=vwan-routing-tests
+az network vwan create -n $vwan -g $rg -l $loc
+loc1="westeurope"
+loc2="northeurope"
+
+## VWAN WE-HUB
+az network vhub create -n we-hub --address-prefix 192.168.1.0/24 -g $rg --vwan $vwan -l $loc1
+
+## VWAN NE-HUB
+az network vhub create -n ne-hub --address-prefix 192.168.2.0/24 -g $rg --vwan $vwan -l $loc2
+
+################################
+## Hub and Spoke WE
+################################
+hubrange=10.1.0.0/24
+hubserversrange=10.1.0.0/25
+hubfwrange=10.1.0.128/26
+fwIP=10.1.0.132
+nvarange=10.1.0.192/26
+nvaIP=10.1.0.196
+
+spoke1range=10.1.2.0/24
+spoke1serversrange=10.1.2.0/25
+
+spoke2range=10.1.3.0/24
+spoke2serversrange=10.1.3.0/25
+
+### WE VNET
+vnet=we-hub-vnet
+az network vnet create -g $rg -n $vnet --address-prefix $hubrange --subnet-name servers --subnet-prefix $hubserversrange -l $loc
+az network vnet subnet create -g $rg -n AzureFirewallSubnet --vnet-name $vnet --address-prefix $hubfwrange
+az network vnet subnet create -g $rg -n nva --vnet-name $vnet --address-prefix $nvarange
+
+### WE SPOKE1 VNET
+az network vnet create -n we-spoke-vnet-01 --address-prefix $spoke1range --subnet-prefix $spoke1serversrange --subnet-name servers -l $loc -g $rg
+
+### WE SPOKE2 VNET
+az network vnet create -n we-spoke-vnet-02 --address-prefix $spoke2range --subnet-prefix $spoke2serversrange --subnet-name servers -l $loc -g $rg
+
+### VNET Peering
+az network vnet peering create -g $rg -n h-to-s1 --vnet-name we-hub-vnet --remote-vnet we-spoke-vnet-01 --allow-vnet-access
+az network vnet peering create -g $rg -n s1-to-h --vnet-name we-spoke-vnet-01 --remote-vnet we-hub-vnet --allow-forwarded-traffic --allow-vnet-access
+az network vnet peering create -g $rg -n h-to-s2 --vnet-name we-hub-vnet --remote-vnet we-spoke-vnet-02 --allow-vnet-access
+az network vnet peering create -g $rg -n s2-to-h --vnet-name we-spoke-vnet-02 --remote-vnet we-hub-vnet --allow-forwarded-traffic --allow-vnet-access
+
+### Test VMs
+az vm create -n vm-we-spoke1 --public-ip-address vm-we-spoke1-pip --vnet-name we-spoke-vnet-01 --image ubuntults -g $rg --generate-ssh-keys --admin-username $admin_user -l $loc --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s #--no-wait
+pip=$(az network public-ip show -n vm-we-spoke1-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+az vm create -n vm-we-spoke2 --public-ip-address vm-we-spoke2-pip --vnet-name we-spoke-vnet-02 --image ubuntults -g $rg --generate-ssh-keys --admin-username $admin_user -l $loc --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s #--no-wait
+pip=$(az network public-ip show -n vm-we-spoke2-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+#ubuntu nva
+az network public-ip create -n vm-we-hub-pip -g $rg --idle-timeout 30 --allocation-method Static --loc $loc
+az network nic create --name vm-we-hub-nic -g $rg --subnet servers --vnet we-hub-vnet --public-ip-address vm-we-hub-pip --loc $loc --ip-forwarding true
+az vm create -n vm-we-hub --nics vm-we-hub-nic --image ubuntults --admin-username $admin_user --generate-ssh-keys -g $rg --loc $loc --size Standard_B1s --os-disk-size 30 --storage-sku Standard_LRS #--no-wait
+pip=$(az network public-ip show -n vm-we-hub-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+ssh $pip "sudo sysctl -w net.ipv4.ip_forward=1"
+
+### route tables
+rt=we-spoke-vnet-01-servers-RT
+az network route-table create -g $rg -n $rt -l $loc
+az network route-table route create -n toNE -g $rg --route-table-name $rt --address-prefix 10.0.0.0/8  --next-hop-type VirtualAppliance  --next-hop-ip-address 10.1.0.4
+az network vnet subnet update --vnet-name we-spoke-vnet-01 -n servers -g $rg  --route-table $rt
+
+rt=we-spoke-vnet-02-servers-RT
+az network route-table create -g $rg -n $rt -l $loc
+az network route-table route create -n toNE -g $rg --route-table-name $rt --address-prefix 10.0.0.0/8  --next-hop-type VirtualAppliance  --next-hop-ip-address 10.1.0.4
+az network vnet subnet update --vnet-name we-spoke-vnet-02 -n servers -g $rg  --route-table $rt
+
+              
+###   Connect WE hub and Spoke  
+weHubVnetId=$(az network vnet show --resource-group $rg --name we-hub-vnet --query id --out tsv)
+# spokes no longer need to be peered with new routing options
+#weSpoke1VnetId=$(az network vnet show --resource-group $rg --name we-spoke-vnet-01 --query id --out tsv)
+#weSpoke2VnetId=$(az network vnet show --resource-group $rg --name we-spoke-vnet-02 --query id --out tsv)
+
+az network vhub connection create -n we-hub-vnet --remote-vnet $weHubVnetId -g $rg --vhub-name we-hub
+#az network vhub connection create -n we-spoke-vnet-01 --remote-vnet $weSpoke1VnetId -g $rg --vhub-name we-hub
+#az network vhub connection create -n we-spoke-vnet-02 --remote-vnet $weSpoke2VnetId -g $rg --vhub-name we-hub
+
+################################
+## Hub and Spoke NE
+################################
+loc2="northeurope"
+hubrange=10.2.0.0/24
+hubserversrange=10.2.0.0/25
+hubfwrange=10.2.0.128/26
+fwIP=10.2.0.132
+nvarange=10.2.0.192/26
+nvaIP=10.2.0.196
+
+spoke1range=10.2.2.0/24
+spoke1serversrange=10.2.2.0/25
+
+spoke2range=10.2.3.0/24
+spoke2serversrange=10.2.3.0/25
+
+### WE VNET
+vnet=ne-hub-vnet
+az network vnet create -g $rg -n $vnet --address-prefix $hubrange --subnet-name servers --subnet-prefix $hubserversrange -l $loc2
+az network vnet subnet create -g $rg -n AzureFirewallSubnet --vnet-name $vnet --address-prefix $hubfwrange
+az network vnet subnet create -g $rg -n nva --vnet-name $vnet --address-prefix $nvarange
+
+### NE SPOKE1 VNET
+az network vnet create -n ne-spoke-vnet-01 --address-prefix $spoke1range --subnet-prefix $spoke1serversrange --subnet-name servers -l $loc2 -g $rg
+
+### NE SPOKE2 VNET
+az network vnet create -n ne-spoke-vnet-02 --address-prefix $spoke2range --subnet-prefix $spoke2serversrange --subnet-name servers -l $loc2 -g $rg
+
+### VNET Peering
+az network vnet peering create -g $rg -n h-to-s1 --vnet-name ne-hub-vnet --remote-vnet ne-spoke-vnet-01 --allow-vnet-access
+az network vnet peering create -g $rg -n s1-to-h --vnet-name ne-spoke-vnet-01 --remote-vnet ne-hub-vnet --allow-forwarded-traffic --allow-vnet-access
+az network vnet peering create -g $rg -n h-to-s2 --vnet-name ne-hub-vnet --remote-vnet ne-spoke-vnet-02 --allow-vnet-access
+az network vnet peering create -g $rg -n s2-to-h --vnet-name ne-spoke-vnet-02 --remote-vnet ne-hub-vnet --allow-forwarded-traffic --allow-vnet-access
+
+### Test VMs
+az vm create -n vm-ne-spoke1 --public-ip-address vm-ne-spoke1-pip --vnet-name ne-spoke-vnet-01 --image ubuntults -g $rg --generate-ssh-keys --admin-username $admin_user -l $loc2 --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s #--no-wait
+pip=$(az network public-ip show -n vm-ne-spoke1-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+az vm create -n vm-ne-spoke2 --public-ip-address vm-ne-spoke2-pip --vnet-name ne-spoke-vnet-02 --image ubuntults -g $rg --generate-ssh-keys --admin-username $admin_user -l $loc2 --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s #--no-wait
+pip=$(az network public-ip show -n vm-ne-spoke2-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+az network public-ip create -n vm-ne-hub-pip -g $rg --idle-timeout 30 --allocation-method Static --loc $loc2
+az network nic create --name vm-ne-hub-nic -g $rg --subnet servers --vnet ne-hub-vnet --public-ip-address vm-ne-hub-pip --loc $loc2 --ip-forwarding true
+az vm create -n vm-ne-hub --nics vm-ne-hub-nic --image ubuntults --admin-username $admin_user --generate-ssh-keys -g $rg --loc $loc2 --size Standard_B1s --os-disk-size 30 --storage-sku Standard_LRS #--no-wait
+pip=$(az network public-ip show -n vm-ne-hub-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+ssh $pip "sudo sysctl -w net.ipv4.ip_forward=1"
+
+### route tables
+rt=ne-spoke-vnet-01-servers-RT
+az network route-table create -g $rg -n $rt -l $loc2
+az network route-table route create -n toNE -g $rg --route-table-name $rt --address-prefix 10.0.0.0/8  --next-hop-type VirtualAppliance  --next-hop-ip-address 10.2.0.4
+az network vnet subnet update --vnet-name ne-spoke-vnet-01 -n servers -g $rg  --route-table $rt
+
+rt=ne-spoke-vnet-02-servers-RT
+az network route-table create -g $rg -n $rt -l $loc2
+az network route-table route create -n toNE -g $rg --route-table-name $rt --address-prefix 10.0.0.0/8  --next-hop-type VirtualAppliance  --next-hop-ip-address 10.2.0.4
+az network vnet subnet update --vnet-name ne-spoke-vnet-02 -n servers -g $rg  --route-table $rt
+
+###   Connect WE hub and Spoke  
+neHubVnetId=$(az network vnet show --resource-group $rg --name ne-hub-vnet --query id --out tsv)
+# spokes no longer need to be peered with new routing options
+#neSpoke1VnetId=$(az network vnet show --resource-group $rg --name ne-spoke-vnet-01 --query id --out tsv)
+#neSpoke2VnetId=$(az network vnet show --resource-group $rg --name ne-spoke-vnet-02 --query id --out tsv)
+
+az network vhub connection create -n ne-hub-vnet --remote-vnet $neHubVnetId -g $rg --vhub-name ne-hub
+#az network vhub connection create -n ne-spoke-vnet-01 --remote-vnet $neSpoke1VnetId -g $rg --vhub-name ne-hub
+#az network vhub connection create -n ne-spoke-vnet-02 --remote-vnet $neSpoke2VnetId -g $rg --vhub-name ne-hub
+
+
+az network public-ip list -g $rg --query '[].{Name:name,IP:ipAddress}' -o tsv
+
+#####
+#####
+#####
+#Quick and dirty branch
+#####
+#####
+#####
+publisher=cisco
+offer=cisco-csr-1000v
+sku=16_12-byol
+version=$(az vm image list -p $publisher -f $offer -s $sku --all --query '[0].version' -o tsv)
+az vm image terms accept --urn  ${publisher}:${offer}:${sku}:${version} --subscription "$subscription"
+
+csr2t_config_url="https://raw.githubusercontent.com/tvuylsteke/azure-cli-samples/master/vwan-routing-v2/csr_config_2tunnels.txt"
+csr4t_config_url="https://raw.githubusercontent.com/tvuylsteke/azure-cli-samples/master/vwan-routing-v2/csr_config_4tunnels.txt"
+
+#VWAN
+
+az network vpn-gateway create -n we-hub-vpngw --vhub we-hub --scale-unit 1 -l $loc1 -g $rg #--no-wait  
+
+az network vpn-site create -n OnPrem1CSR --asn 65001  --ip-address 1.2.3.4 --bgp-peering-address 5.6.7.8 -g $rg --device-model CSR --device-vendor Cisco --virtual-wan $vwan
+az network vpn-gateway connection create -n OnPrem1toWE --gateway-name we-hub-vpngw --remote-vpn-site OnPrem1CSR -g $rg --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password"
+
+storage_account=vpnconfigs$RANDOM 
+container_name=configs
+blob_name=vpnconfig.json
+file_name="/tmp/${blob_name}"
+az storage account create -n $storage_account -g $rg -l $loc --sku Standard_LRS
+az storage container create -n $container_name --account-name $storage_account
+end_time=`date -u -d "30 minutes" '+%Y-%m-%dT%H:%MZ'`
+sas=$(az storage container generate-sas -n $container_name --account-name $storage_account --permissions dlrw --expiry $end_time -o tsv)
+account_url=$(az storage account show -n $storage_account -g $rg --query primaryEndpoints.blob -o tsv)
+storage_url=${account_url}${container_name}"/"${blob_name}"?"${sas}
+### get configs
+az network vpn-site download --vwan-name $vwan -g $rg --vpn-sites OnPrem1CSR --output-blob-sas-url $storage_url
+az storage blob download --account-name $storage_account -c $container_name -n $blob_name --sas-token $sas -f $file_name
+
+site=OnPrem1CSR
+branch_asn=65050
+prefix=onprem1
+vnet=$prefix"-vnet"
+vnetrange=10.50.0.0/16
+subnet1=servers
+serverrange=10.50.10.0/24
+subnet2=csrnet
+firewallrange=10.50.1.0/24
+fwIP=10.50.1.5
+
+### VNET
+az network vnet create --resource-group $rg --name $vnet --loc $loc --address-prefixes $vnetrange --subnet-name $subnet1 --subnet-prefix $serverrange
+az network vnet subnet create --address-prefix $firewallrange --name $subnet2 --resource-group $rg --vnet-name $vnet
+###  CSR
+az network public-ip create -n $prefix"-CSRpip" -g $rg --idle-timeout 30 --allocation-method Static --loc $loc
+az network nic create --name $prefix"-CSRnic" -g $rg --subnet $subnet2 --vnet $vnet --private-ip-address $fwIP --public-ip-address $prefix"-CSRpip" --loc $loc --ip-forwarding true
+az vm create -n $prefix"-CSR" --nics $prefix"-CSRnic" --image ${publisher}:${offer}:${sku}:${version} --admin-username $admin_user --generate-ssh-keys -g $rg --loc $loc --size Standard_D2_v2 #--no-wait
+csrpip=$(az network public-ip show -n $prefix"-CSRpip" -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $csrpip >> ~/.ssh/known_hosts
+
+### test VM
+az vm create -n $prefix"-VM" --public-ip-address $prefix"-VM-pip" --vnet-name $vnet --image ubuntults -g $rg --generate-ssh-keys --admin-username $admin_user -l $loc --subnet $subnet1 --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s #--no-wait
+pip=$(az network public-ip show -n $prefix"-VM-pip" -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+### Route Table
+rt="$vnet-servers-RT"
+az network route-table create --name $rt --resource-group $rg --loc $loc
+az network route-table route create -n DefaultRoute -g $rg --route-table-name $rt --address-prefix 10.0.0.0/8  --next-hop-type VirtualAppliance  --next-hop-ip-address $fwIP
+az network vnet subnet update --name $subnet1 --vnet-name $vnet --resource-group $rg --route-table $rt
+
+# Update VWAN config with real values
+az network vpn-site update -n $site --ip-address $csrpip --asn $branch_asn --bgp-peering-address $fwIP --virtual-wan $vwan -g $rg 
+
+# No Cross Connection, so each branch is connected to one VWAN Hub: 2 tunnels
+# Extract info for branch
+# a VPN site might have connections to multiple VWAN HUB VPN Gateways. The region determines the HUB the GW is running in
+region="West Europe"
+hub_psk=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .connectionConfiguration.PSK')
+hub_gw0_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance0')
+hub_gw1_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance1')
+hub_gw0_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance0')
+hub_gw1_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance1')
+echo "Extracted info for $site: Gateway0 $hub_gw0_pip, $hub_gw0_bgp_ip Gateway1 $hub_gw1_pip, $hub_gw1_bgp_ip. PSK $hub_psk"
+
+### CSR config
+#CSRNET=10.50.0.0
+#CSRMASK=255.255.0.0
+#CSRGW=10.50.1.1
+
+csr_config_url=$csr2t_config_url
+config_file_csr='branch2_csr.cfg'
+config_file_local='/tmp/branch2_csr.cfg'
+wget $csr_config_url -O $config_file_local
+sed -i "s|\*\*PSK\*\*|${hub_psk}|g" $config_file_local
+sed -i "s|\*\*GW0_Private_IP\*\*|${hub_gw0_bgp_ip}|g" $config_file_local
+sed -i "s|\*\*GW1_Private_IP\*\*|${hub_gw1_bgp_ip}|g" $config_file_local
+sed -i "s|\*\*GW0_Public_IP\*\*|${hub_gw0_pip}|g" $config_file_local
+sed -i "s|\*\*GW1_Public_IP\*\*|${hub_gw1_pip}|g" $config_file_local
+sed -i "s|\*\*BGP_ID\*\*|${branch_asn}|g" $config_file_local
+scp $config_file_local ${csrpip}:/${config_file_csr}
+ssh $csrpip <<EOF
+  config t
+    file prompt quiet
+EOF
+ssh $csrpip "copy bootflash:${config_file_csr} running-config"
+ssh $csrpip "wr mem"
+ssh $csrpip "sh ip int b"
+
+fi
+
+#####################
+####################
+
+az network vpn-gateway create -n ne-hub-vpngw --vhub ne-hub --scale-unit 1 -l $loc2 -g $rg #--no-wait  
+
+az network vpn-site create -n OnPrem2CSR --asn 65001  --ip-address 1.2.3.4 --bgp-peering-address 5.6.7.8 -g $rg --device-model CSR --device-vendor Cisco --virtual-wan $vwan
+az network vpn-gateway connection create -n OnPrem2toNE --gateway-name ne-hub-vpngw --remote-vpn-site OnPrem2CSR -g $rg --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password"
+
+storage_account=vpnconfigs$RANDOM 
+container_name=configs
+blob_name=vpnconfig.json
+file_name="/tmp/${blob_name}"
+az storage account create -n $storage_account -g $rg -l $loc --sku Standard_LRS
+az storage container create -n $container_name --account-name $storage_account
+end_time=`date -u -d "30 minutes" '+%Y-%m-%dT%H:%MZ'`
+sas=$(az storage container generate-sas -n $container_name --account-name $storage_account --permissions dlrw --expiry $end_time -o tsv)
+account_url=$(az storage account show -n $storage_account -g $rg --query primaryEndpoints.blob -o tsv)
+storage_url=${account_url}${container_name}"/"${blob_name}"?"${sas}
+### get configs
+az network vpn-site download --vwan-name $vwan -g $rg --vpn-sites OnPrem2CSR --output-blob-sas-url $storage_url
+az storage blob download --account-name $storage_account -c $container_name -n $blob_name --sas-token $sas -f $file_name
+
+site=OnPrem2CSR
+branch_asn=65060
+prefix=onprem2
+vnet=$prefix"-vnet"
+vnetrange=10.60.0.0/16
+subnet1=servers
+serverrange=10.60.10.0/24
+subnet2=csrnet
+firewallrange=10.60.1.0/24
+fwIP=10.60.1.5
+
+### VNET
+az network vnet create --resource-group $rg --name $vnet --loc $loc --address-prefixes $vnetrange --subnet-name $subnet1 --subnet-prefix $serverrange
+az network vnet subnet create --address-prefix $firewallrange --name $subnet2 --resource-group $rg --vnet-name $vnet
+###  CSR
+az network public-ip create -n $prefix"-CSRpip" -g $rg --idle-timeout 30 --allocation-method Static --loc $loc
+az network nic create --name $prefix"-CSRnic" -g $rg --subnet $subnet2 --vnet $vnet --private-ip-address $fwIP --public-ip-address $prefix"-CSRpip" --loc $loc --ip-forwarding true
+az vm create -n $prefix"-CSR" --nics $prefix"-CSRnic" --image ${publisher}:${offer}:${sku}:${version} --admin-username $admin_user --generate-ssh-keys -g $rg --loc $loc --size Standard_D2_v2 #--no-wait
+csrpip=$(az network public-ip show -n $prefix"-CSRpip" -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $csrpip >> ~/.ssh/known_hosts
+
+### test VM
+az vm create -n $prefix"-VM" --public-ip-address $prefix"-VM-pip" --vnet-name $vnet --image ubuntults -g $rg --generate-ssh-keys --admin-username $admin_user -l $loc --subnet $subnet1 --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s #--no-wait
+pip=$(az network public-ip show -n $prefix"-VM-pip" -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+### Route Table
+rt="$vnet-servers-RT"
+az network route-table create --name $rt --resource-group $rg --loc $loc
+az network route-table route create -n DefaultRoute -g $rg --route-table-name $rt --address-prefix 10.0.0.0/8  --next-hop-type VirtualAppliance  --next-hop-ip-address $fwIP
+az network vnet subnet update --name $subnet1 --vnet-name $vnet --resource-group $rg --route-table $rt
+
+# Update VWAN config with real values
+az network vpn-site update -n $site --ip-address $csrpip --asn $branch_asn --bgp-peering-address $fwIP --virtual-wan $vwan -g $rg 
+
+# No Cross Connection, so each branch is connected to one VWAN Hub: 2 tunnels
+# Extract info for branch
+# a VPN site might have connections to multiple VWAN HUB VPN Gateways. The region determines the HUB the GW is running in
+region="North Europe"
+hub_psk=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .connectionConfiguration.PSK')
+hub_gw0_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance0')
+hub_gw1_pip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.IpAddresses.Instance1')
+hub_gw0_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance0')
+hub_gw1_bgp_ip=$(cat $file_name | jq --arg reg "$region" -r '.[] | select (.vpnSiteConfiguration.Name == "'$site'") | .vpnSiteConnections[] | select (.hubConfiguration.Region == $reg) | .gatewayConfiguration.BgpSetting.BgpPeeringAddresses.Instance1')
+echo "Extracted info for $site: Gateway0 $hub_gw0_pip, $hub_gw0_bgp_ip Gateway1 $hub_gw1_pip, $hub_gw1_bgp_ip. PSK $hub_psk"
+
+### CSR config
+#CSRNET=10.50.0.0
+#CSRMASK=255.255.0.0
+#CSRGW=10.50.1.1
+
+csr_config_url=$csr2t_config_url
+config_file_csr='branch2_csr.cfg'
+config_file_local='/tmp/branch2_csr.cfg'
+wget $csr_config_url -O $config_file_local
+sed -i "s|\*\*PSK\*\*|${hub_psk}|g" $config_file_local
+sed -i "s|\*\*GW0_Private_IP\*\*|${hub_gw0_bgp_ip}|g" $config_file_local
+sed -i "s|\*\*GW1_Private_IP\*\*|${hub_gw1_bgp_ip}|g" $config_file_local
+sed -i "s|\*\*GW0_Public_IP\*\*|${hub_gw0_pip}|g" $config_file_local
+sed -i "s|\*\*GW1_Public_IP\*\*|${hub_gw1_pip}|g" $config_file_local
+sed -i "s|\*\*BGP_ID\*\*|${branch_asn}|g" $config_file_local
+scp $config_file_local ${csrpip}:/${config_file_csr}
+ssh $csrpip <<EOF
+  config t
+    file prompt quiet
+EOF
+ssh $csrpip "copy bootflash:${config_file_csr} running-config"
+ssh $csrpip "wr mem"
+ssh $csrpip "sh ip int b"

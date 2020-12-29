@@ -9,7 +9,7 @@ sudo python -n http.server 80
 # IP forwarding
 https://www.networkinghowtos.com/howto/enable-ip-forwarding-on-ubuntu-13-04/
 
-sudo sysctl -w net.ipv4.ip_forward = 1
+sudo sysctl -w net.ipv4.ip_forward=1
 
 
 tcpdump -i eth1 port not 22 and host 1.2.3.4

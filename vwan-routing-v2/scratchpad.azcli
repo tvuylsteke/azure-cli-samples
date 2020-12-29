@@ -11,114 +11,89 @@ az account set --subscription "$subscription"
 az extension add --name virtual-wan
 
 #variables
-rg=vwan-v2v
+rg=az-vwan-routing5
+loc="westcentralus"
 admin_password=$(az keyvault secret show --id https://setspnvault.vault.azure.net/secrets/local-vm-password/efcdc715a1de4dca90806409730fb638 --query 'value' -o tsv)
 admin_user=azadmin
+
+# Resource Group
+az group create -n $rg -l $loc
 
 ################################
 ## VWAN Config
 ################################
-mainloc="westeurope"
-secloc="northeurope"
-
-# Resource Group
-az group create -n $rg -l $mainloc
-
 vwan=vwan-routing-lab
-az network vwan create -n $vwan -g $rg -l $mainloc
+az network vwan create -n $vwan -g $rg -l $loc
+loc1="westcentralus"
+loc2="centralus"
 
 ## VWAN WE-HUB
-az network vhub create -n we-hub --address-prefix 192.168.1.0/24 -g $rg --vwan $vwan -l $mainloc
+az network vhub create -n we-hub --address-prefix 192.168.1.0/24 -g $rg --vwan $vwan -l $loc1
 
 ## VWAN NE-HUB
-az network vhub create -n ne-hub --address-prefix 192.168.2.0/24 -g $rg --vwan $vwan -l $secloc
+az network vhub create -n ne-hub --address-prefix 192.168.2.0/24 -g $rg --vwan $vwan -l $loc2
 
 ################################
 ## VNETs connected to VWAN hubs
 ################################
-loc1="westeurope"
 vwanhub1=we-hub
 vnet1=we-spoke-vnet-01
 subnet1range=10.1.1.0/24
 subnet1serversrange=10.1.1.0/25
 
-loc2="westeurope"
 vwanhub2=we-hub
 vnet2=we-spoke-vnet-02
 subnet2range=10.1.2.0/24
 subnet2serversrange=10.1.2.0/25
 
-loc3="westeurope"
 vwanhub3=we-hub
 vnet3=we-spoke-vnet-03
 subnet3range=10.1.3.0/24
 subnet3serversrange=10.1.3.0/25
 
-loc4="westeurope"
 vwanhub4=we-hub
 vnet4=we-spoke-vnet-04
 subnet4range=10.1.4.0/24
 subnet4serversrange=10.1.4.0/25
 
-loc5="northeurope"
 vwanhub5=ne-hub
 vnet5=ne-spoke-vnet-01
 subnet5range=10.2.1.0/24
 subnet5serversrange=10.2.1.0/25
 
-loc6="northeurope"
 vwanhub6=ne-hub
-vnet6=ne-spoke-vnet-02
+vnet6=ne-spoke-vnet-01
 subnet6range=10.2.2.0/24
 subnet6serversrange=10.2.2.0/25
 
-loc7="northeurope"
 vwanhub7=ne-hub
-vnet7=ne-spoke-vnet-03
+vnet7=ne-spoke-vnet-01
 subnet7range=10.2.3.0/24
 subnet7serversrange=10.2.3.0/25
 
-loc8="northeurope"
 vwanhub8=ne-hub
-vnet8=ne-spoke-vnet-04
-subnet8range=10.2.4.0/24
-subnet8serversrange=10.2.4.0/25
+vnet8=ne-spoke-vnet-01
+subnet8range=10.2.3.0/24
+subnet8serversrange=10.2.3.0/25
 
-loc9="westeurope"
-vwanhub9=we-hub
-vnet9=we-spoke-vnet-fw
-subnet9range=10.1.5.0/24
-subnet9serversrange=10.1.5.0/25
-
-loc10="northeurope"
-vwanhub10=ne-hub
-vnet10=ne-spoke-vnet-fw
-subnet10range=10.2.5.0/24
-subnet10serversrange=10.2.5.0/25
-
-for i in {9..10}
+for i in {1..8}
 do
-    loc=loc$i
     vwanhub=vwanhub$i
     vnet=vnet$i
     subnetrange=subnet$i\range
     subnetserversrange=subnet$i\serversrange
-    echo ${!loc}
     echo ${!vwanhub}
     echo ${!vnet}
     echo ${!subnetrange}
     echo ${!subnetserversrange}
-    az network vnet create -n "${!vnet}" --address-prefix ${!subnetrange} --subnet-prefix ${!subnetserversrange} --subnet-name servers -l "${!loc}" -g $rg
+
+    az network vnet create -n "${!vnet}" --address-prefix ${!subnetrange} --subnet-prefix ${!subnetserversrange} --subnet-name servers -l $loc -g $rg
     ### Test VMs
-    az vm create -n "${!vnet}-vm" --public-ip-address "${!vnet}-vm-pip" --vnet-name ${!vnet} --image ubuntults -g $rg --generate-ssh-keys --admin-username $admin_user -l "${!loc}" --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s #--no-wait
+    az vm create -n "${!vnet}-vm" --public-ip-address "${!vnet}-vm-pip" --vnet-name ${!vnet} --image ubuntults -g $rg --generate-ssh-keys --admin-username $admin_user -l $loc --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s #--no-wait
     pip=$(az network public-ip show -n "${!vnet}-vm-pip" -g $rg --query ipAddress -o tsv)
     ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
     ###   Connect WE hub and Spokes  
     vnetId=$(az network vnet show --resource-group $rg --name "${!vnet}" --query id --out tsv)
-    az network vhub connection create -n "${!vnet}" --remote-vnet $vnetId -g $rg --vhub-name "${!vwanhub}"
+    az network vhub connection create -n "${!vnet}" --remote-vnet $vnetId -g $rg --vhub-name ${!vwanhub}"
 done
-
-
-#
-
-az network public-ip list -g $rg --query '[].{Name:name,IP:ipAddress}' -o tsv
