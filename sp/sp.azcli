@@ -1,0 +1,57 @@
+#https://www.silver-peak.com/sites/default/files/UserDocuments/ECV_Azure_HTML/rev-d/#Source/Text/Base-42_ECV-Create.htm?TocPath=Single%2520EC-V%2520Deployment%2520with%2520Static%2520Routes%257CCreate%2520an%2520EC-V%2520Appliance%2520in%2520the%2520Azure%2520Portal%257C_____2
+subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
+admin_password=Microsoft123!
+admin_user=azadmin
+rg=az-sp-routing
+loc="westeurope"
+
+#select subscription
+az account set --subscription "$subscription"
+
+#Resource Group
+az group create -n $rg -l $loc
+
+vnet=SP-VNET
+vnet_RANGE=10.133.0.0/16
+sub_MGMT0=10.133.1.0/24
+sub_WAN0=10.133.2.0/24
+sub_LAN0=10.133.3.0/24
+sub_WKLD=10.133.4.0/24
+
+az network vnet create -g $rg -n $vnet --address-prefix $vnet_RANGE --subnet-name sub_MGMT0 --subnet-prefix $sub_MGMT0 -l $loc
+
+az network vnet subnet create -g $rg -n sub_WAN0 --vnet-name $vnet --address-prefix $sub_WAN0
+az network vnet subnet create -g $rg -n sub_LAN0 --vnet-name $vnet --address-prefix $sub_LAN0
+az network vnet subnet create -g $rg -n sub_WKLD --vnet-name $vnet --address-prefix $sub_WKLD
+
+az network nsg create -g $rg -n nsg_WAN0
+az network nsg rule create -g $rg --nsg-name nsg_WAN0 -n Allow_All_Inbound --priority 200 \
+    --source-address-prefixes '*' --source-port-ranges '*' \
+    --destination-address-prefixes '*' --destination-port-ranges '*' --access Allow \
+    --protocol '*' --description "Allow all" --direction Inbound
+#az network nsg rule create -g $rg --nsg-name nsg_WAN0 -n Allow_All_Outbound --priority 200 \
+    #--source-address-prefixes '*' --source-port-ranges '*' \
+    #--destination-address-prefixes '*' --destination-port-ranges '*' --access Allow \
+    #--protocol '*' --description "Allow all" --direction Outbound
+
+az network nsg create -g $rg -n nsg_LAN0
+az network nsg rule create -g $rg --nsg-name nsg_LAN0 -n Allow_All_Inbound --priority 200 \
+    --source-address-prefixes "10.133.0.0/16" --source-port-ranges '*' \
+    --destination-address-prefixes '*' --destination-port-ranges '*' --access Allow \
+    --protocol '*' --description "Allow all" --direction Inbound
+#az network nsg rule create -g $rg --nsg-name nsg_LAN0 -n Allow_All_Outbound --priority 200 \
+    #--source-address-prefixes '*' --source-port-ranges '*' \
+    #--destination-address-prefixes '*' --destination-port-ranges '*' --access Allow \
+    #--protocol '*' --description "Allow all" --direction Outbound
+
+# test VM
+az vm create -n wkldVM --public-ip-address wkldVMpip --vnet-name $vnet --image ubuntults -g $rg --generate-ssh-keys --admin-username $admin_user -l $loc --subnet sub_WKLD --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s #--no-wait
+pip=$(az network public-ip show -n wkldVMpip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+
+az network route-table create -g $rg -n RouteTable01 
+az network route-table route create -g $rg --route-table-name RouteTable01 -n appServiceRoute --address-prefix AppServiceManagement --next-hop-type Internet 
+az network route-table route create -g $rg --route-table-name RouteTable01 -n WVD --address-prefix WindowsVirtualDesktop --next-hop-type Internet 
+az network route-table route create -g $rg --route-table-name RouteTable01 -n AzureSouthCentral --address-prefix AzureCloud.southcentralus --next-hop-type Internet AzureCloud.southcentralus 
+________________________________________

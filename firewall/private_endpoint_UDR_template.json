@@ -1,0 +1,46 @@
+{
+  "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]"
+    },
+    "privateEndpointName": {
+      "type": "string"
+    },
+    "subnetId": {
+      "type": "string"
+    },
+    "privateLinkResourceId": {
+      "type": "string"
+    },
+    "privateLinkResourceGroupId": {
+      "type": "string"
+    }
+  },
+  "resources": [
+    {
+      "name": "[parameters('privateEndpointName')]",
+      "type": "Microsoft.Network/privateEndpoints",
+      "apiVersion": "2020-05-01",
+      "location": "[parameters('location')]",
+      "properties": {
+        "subnet": {
+          "id": "[parameters('subnetId')]"
+        },
+        "privateLinkServiceConnections": [
+          {
+            "name": "MyPrivateEndpointConnection",
+            "properties": {
+              "privateLinkServiceId": "[parameters('privateLinkResourceId')]",
+              "groupIds": [
+                "[parameters('privateLinkResourceGroupId')]"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

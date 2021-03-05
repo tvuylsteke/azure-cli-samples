@@ -24,6 +24,7 @@ curl https://packages.microsoft.com/config/ubuntu/16.04/prod.list > /etc/apt/sou
 exit
 sudo apt-get update
 sudo ACCEPT_EULA=Y apt-get install msodbcsql17 mssql-tools
+# split here
 echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bash_profile
 echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bashrc
 source ~/.bashrc

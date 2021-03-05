@@ -1,0 +1,197 @@
+#source: https://raw.githubusercontent.com/erjosito/azcli/master/routeserver.azcli
+#https://raw.githubusercontent.com/erjosito/azcli/master/linuxnva.azcli
+subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
+#select subscription
+az account set --subscription "$subscription"
+
+# variables
+rg=az-routeserver2
+location=westeurope
+
+vnet_name=hub2
+vnet_prefix=10.11.0.0/16
+# Route Server
+rs_subnet_name=RouteServerSubnet
+rs_subnet_prefix=10.11.0.0/24
+rs_name=rshub2
+# GW (future use)
+gw_subnet_prefix=10.11.1.0/24
+# NVA
+nva_subnet_name=nva
+nva_subnet_prefix=10.11.2.0/24
+nva_subnet_dgw=10.11.2.1
+nva_ip=10.11.2.10
+nva_name=hub2nva
+nva_asn=65002
+# test VM
+vm_subnet_name=vm
+vm_subnet_prefix=10.11.3.0/24
+vm_name=hub2vm
+
+# Create Vnet
+az group create -n $rg -l $location
+az network vnet create -g $rg -n $vnet_name --address-prefix $vnet_prefix --subnet-name $rs_subnet_name --subnet-prefix $rs_subnet_prefix
+
+# Create hub subnets (no subnet can be created while the route server is being provisioned)
+az network vnet subnet create -n $nva_subnet_name --address-prefix $nva_subnet_prefix --vnet-name $vnet_name -g $rg
+az network vnet subnet create -n $vm_subnet_name --address-prefix $vm_subnet_prefix --vnet-name $vnet_name -g $rg
+az network vnet subnet create -n GatewaySubnet --address-prefix $gw_subnet_prefix --vnet-name $vnet_name -g $rg
+
+# Create Route Server
+subnet_id=$(az network vnet subnet show -n $rs_subnet_name --vnet-name $vnet_name -g $rg --query id -o tsv)
+az network vrouter create -n $rs_name -g $rg --hosted-subnet $subnet_id -l $location
+
+# Get info (once created)
+rs_ip1=$(az network routeserver show -n $rs_name -g $rg --query 'virtualRouterIps[0]' -o tsv) && echo $rs_ip1
+rs_ip2=$(az network routeserver show -n $rs_name -g $rg --query 'virtualRouterIps[1]' -o tsv) && echo $rs_ip2
+vr_asn=$(az network routeserver show -n $rs_name -g $rg --query 'virtualRouterAsn' -o tsv) && echo $vr_asn
+
+# Create NVA
+onprem_linuxnva_asn=$nva_asn
+onprem_linuxnva_name=$nva_name
+onprem_linuxnva_pip=${onprem_linuxnva_name}-pip
+onprem_linuxnva_ip=$nva_ip
+linuxnva_cloudinit_file=/tmp/linuxnva_cloudinit_noauto.txt
+onprem_linuxnva_guid=$(new_guid)
+cat <<EOF > $linuxnva_cloudinit_file
+#cloud-config
+runcmd:
+  - apt update && apt install -y bird strongswan
+  - sysctl -w net.ipv4.ip_forward=1
+  - sysctl -w net.ipv4.conf.all.accept_redirects = 0 
+  - sysctl -w net.ipv4.conf.all.send_redirects = 0
+EOF
+
+az vm create -n $onprem_linuxnva_name -g $rg -l $location --image ubuntuLTS --generate-ssh-keys \
+    --public-ip-address $onprem_linuxnva_pip --vnet-name $vnet_name --size Standard_B1s --subnet $nva_subnet_name \
+    --custom-data $linuxnva_cloudinit_file --private-ip-address "$onprem_linuxnva_ip"
+onprem_linuxnva_nic_id=$(az vm show -n $onprem_linuxnva_name -g "$rg" --query 'networkProfile.networkInterfaces[0].id' -o tsv)
+az network nic update --ids $onprem_linuxnva_nic_id --ip-forwarding
+
+onprem_linuxnva_pip_ip=$(az network public-ip show -n $onprem_linuxnva_pip -g $rg --query ipAddress -o tsv) && echo $onprem_linuxnva_pip_ip
+onprem_linuxnva_private_ip=$(az network nic show --ids $onprem_linuxnva_nic_id --query 'ipConfigurations[0].privateIpAddress' -o tsv) && echo $onprem_linuxnva_private_ip
+onprem_linuxnva_default_gw=$nva_subnet_dgw
+sleep 30  # It can take some time for the bird/ipsec daemons to start
+
+ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no $onprem_linuxnva_pip_ip "sudo ip route add $rs_ip1/32 via $nva_subnet_dgw"
+ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no $onprem_linuxnva_pip_ip "sudo ip route add $rs_ip2/32 via $nva_subnet_dgw"
+
+#https://blog.kintone.io/entry/bird
+
+# copy from bird-hub2.conf
+# Configure BGP with Bird 
+bird_config_file=/tmp/bird.conf
+cat <<EOF > $bird_config_file
+log syslog all;
+router id $onprem_linuxnva_private_ip;
+protocol device {
+        scan time 10;
+}
+protocol direct {
+      disabled;
+}
+protocol kernel {
+      preference 254;
+      learn;
+      merge paths on;
+      import filter {
+          #if net ~ ${rs_ip1}/32 then accept;
+          #else reject;
+          reject;
+      };
+      export filter {
+          accept;
+          #if net ~ ${rs_ip1}/32 then reject;
+          #else accept;
+      };
+}
+protocol static {
+      import all;
+      route 3.3.3.3/32 via $onprem_linuxnva_private_ip;
+      #route $vnet_prefix via $onprem_linuxnva_default_gw;
+}
+
+template bgp routeserver {
+      description "BGP to RS";
+      multihop;
+      local $onprem_linuxnva_private_ip as $onprem_linuxnva_asn;
+      import filter {reject;};
+      export filter {accept;};
+}
+
+protocol bgp rs1 from routeserver {
+     neighbor $rs_ip1 as $vr_asn;
+}
+
+protocol bgp rs2 from routeserver {
+     neighbor $rs_ip2 as $vr_asn;
+}
+EOF
+
+# Deploy config files
+username=$(whoami)
+scp $bird_config_file "${onprem_linuxnva_pip_ip}:/home/${username}/bird.conf"
+ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no $onprem_linuxnva_pip_ip "sudo mv /home/${username}/bird.conf /etc/bird/bird.conf"
+ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no $onprem_linuxnva_pip_ip "sudo systemctl restart bird"
+
+
+# Wait 1 minute to make sure the config is applied
+sleep 60
+
+# Create test VM
+az vm create -n $vm_name -g $rg -l $location --image ubuntuLTS --generate-ssh-keys \
+    --public-ip-address $vm_name-pip --vnet-name $vnet_name --size Standard_B1s --subnet $vm_subnet_name
+pip=$(az network public-ip show -n $vm_name-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+
+# Route Server
+
+# Create peering
+az network routeserver peering create --vrouter-name $rs_name -g $rg --peer-ip $nva_ip --peer-asn $onprem_linuxnva_asn -n $nva_name
+
+# Create peered vnets with Ubuntu VM
+# spoke 1
+spoke1_name=spoke21
+spoke1_prefix=10.12.0.0/24
+spoke1_subnet_name=vm
+spoke1_subnet_prefix=10.12.0.0/25
+az network vnet create -g $rg -n $spoke1_name --address-prefix $spoke1_prefix --subnet-name $spoke1_subnet_name --subnet-prefix $spoke1_subnet_prefix -l $location
+az network vnet peering create -n hubtospoke1 -g $rg --vnet-name $vnet_name --remote-vnet $spoke1_name --allow-vnet-access --allow-forwarded-traffic --allow-gateway-transit
+az network vnet peering create -n spoke1tohub -g $rg --vnet-name $spoke1_name --remote-vnet $vnet_name --allow-vnet-access --allow-forwarded-traffic --use-remote-gateways
+az vm create -n spoke21-vm -g $rg -l $location --image ubuntuLTS --generate-ssh-keys \
+    --public-ip-address spoke21-vm-pip --vnet-name $spoke1_name --size Standard_B1s --subnet vm
+spoke1_ip=$(az network public-ip show -n spoke1-vm-pip --query ipAddress -o tsv -g $rg)
+spoke1_nic_id=$(az vm show -n spoke21-vm -g "$rg" --query 'networkProfile.networkInterfaces[0].id' -o tsv)
+spoke1_private_ip=$(az network nic show --ids $spoke1_nic_id --query 'ipConfigurations[0].privateIpAddress' -o tsv) && echo $spoke1_private_ip
+
+# spoke 2
+spoke2_name=spoke22
+spoke2_prefix=10.12.1.0/24
+spoke2_subnet_name=vm
+spoke2_subnet_prefix=10.12.1.0/25
+az network vnet create -g $rg -n $spoke2_name --address-prefix $spoke2_prefix --subnet-name $spoke2_subnet_name --subnet-prefix $spoke2_subnet_prefix -l $location
+az network vnet peering create -n hubtospoke2 -g $rg --vnet-name $vnet_name --remote-vnet $spoke2_name --allow-vnet-access --allow-forwarded-traffic --allow-gateway-transit
+az network vnet peering create -n spoke2tohub -g $rg --vnet-name $spoke2_name --remote-vnet $vnet_name --allow-vnet-access --allow-forwarded-traffic --use-remote-gateways
+az vm create -n spoke22-vm -g $rg -l $location --image ubuntuLTS --generate-ssh-keys \
+    --public-ip-address spoke22-vm-pip --vnet-name $spoke2_name --size Standard_B1s --subnet vm
+spoke2_ip=$(az network public-ip show -n spoke2-vm-pip --query ipAddress -o tsv -g $rg)
+spoke2_nic_id=$(az vm show -n spoke22-vm -g "$rg" --query 'networkProfile.networkInterfaces[0].id' -o tsv)
+spoke2_private_ip=$(az network nic show --ids $spoke2_nic_id --query 'ipConfigurations[0].privateIpAddress' -o tsv) && echo $spoke2_private_ip
+
+
+az network nic show-effective-route-table -n spoke21-vmVMNic -g $rg -o table
+
+#az network vnet peering update -n hubtospoke1 -g $rg --vnet-name $vnet_name --set allowGatewayTransit=true
+#az network vnet peering update -n spoke1tohub -g $rg --vnet-name $spoke1_name --set useRemoteGateways=true
+#az network vnet peering update -n hubtospoke2 -g $rg --vnet-name $vnet_name --set allowGatewayTransit=true
+#az network vnet peering update -n spoke2tohub -g $rg --vnet-name $spoke2_name --set useRemoteGateways=true
+
+az network nic show-effective-route-table -n spoke21-vmVMNic -g $rg -o table
+az network nic show-effective-route-table -n spoke22-vmVMNic -g $rg -o table
+
+#we need the below UDR as the RS from hub1 will learn HUB2 / SpokesIn2 routes with the next hop of either the NVAin1 or NVAin2. Hub needs the first, spokes the latter. 
+#alternatively use VXLAN or some tunneling concept
+az network route-table create -n NVA2_RT -g $rg -l $location --disable-bgp-route-propagation
+az network route-table route create -g $rg --route-able-name NVA2_RT -n toSpokesInHub1 --next-hop-type VirtualAppliance --address-prefix 10.2.0.0/16 --next-hop-ip-address 10.1.2.10
+az network vnet subnet update -g $rg --vnet-name $vnet_name -n $nva_subnet_name --route-table NVA2_RT

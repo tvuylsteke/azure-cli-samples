@@ -1,5 +1,5 @@
 {
-    "Name": "Azure Image Builder Service Image Creation Role",
+    "Name": "Azure Image Builder Image Def1614683068",
     "IsCustom": true,
     "Description": "Image Builder access to create resources for the image build, you should delete or split out as appropriate",
     "Actions": [
@@ -16,7 +16,7 @@
   
     ],
     "AssignableScopes": [
-      "/subscriptions/<subscriptionID>/resourceGroups/<rgName>"
+      "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-gnva-image"
     ]
   }
 

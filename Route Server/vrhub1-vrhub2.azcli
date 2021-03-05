@@ -1,0 +1,77 @@
+
+#configure VNET peering between both hubs
+az network vnet peering create -n hub1tohub2 -g $rg --vnet-name hub1 --remote-vnet hub2 --allow-vnet-access --allow-forwarded-traffic
+az network vnet peering create -n hub2tohub1 -g $rg --vnet-name hub2 --remote-vnet hub1 --allow-vnet-access --allow-forwarded-traffic
+
+#on NVAhub1
+#fix with correct stuff from bird-hub1.confg
+protocol bgp nvahub2 {
+      description "BGP to NVAHUB2";
+      multihop;
+      local as 65001;
+      neighbor 10.11.2.10 as 65002;
+      import filter {accept;};
+      export filter {accept;};
+}
+
+#necessary?
+sudo ip route add 10.11.2.10/32 via 10.1.2.1
+
+#on NVAhub2
+#fix with correct stuff from bird-hub2.confg
+protocol bgp nvahub1 {
+      description "BGP to NVAHUB1";
+      multihop;
+      local as 65002;
+      neighbor 10.1.2.10 as 65001;
+      import filter {accept;};
+      export filter {accept;};
+}
+
+#necessary?
+sudo ip route add 10.1.2.10/32 via 10.11.2.1
+
+#eventually didn't end up using this.
+#Cross peerings
+#az network routeserver peering create --vrouter-name rshub1 -g $rg --peer-ip 10.11.2.10 --peer-asn 65002 -n nvahub2
+#az network routeserver peering create --vrouter-name rshub2 -g $rg --peer-ip 10.1.2.10 --peer-asn 65001 -n nvahub1
+
+#diagnostics
+
+az network routeserver list -g $rg -o table
+az network routeserver show -n $rs_name -g $rg
+az network routeserver peering list --vrouter-name $rs_name -g $rg -o table
+az network routeserver peering show -n $nva_name --vrouter-name $rs_name -g $rg
+
+#check routes on test vm
+az network nic show-effective-route-table -n ${vm_name}VMNic -g $rg -o table
+
+#vrouter-name might become routeserver
+az network routeserver peering list-learned-routes -n $nva_name -g $rg --vrouter-name $rs_name
+az network routeserver peering list-advertised-routes -n $nva_name -g $rg --vrouter-name $rs_name
+
+az network routeserver peering list-learned-routes -n hub --vrouter-name $rs_name -g $rg --query 'RouteServiceRole_IN_0' -o table
+
+sudo birdc show route
+sudo birdc show protocol
+sudo systemctl restart bird
+sudo tcpdump port 179
+netstat -rnv
+ip route show
+
+az network nic show-effective-route-table -n spoke1-vmVMNic -g $rg -o table
+az network nic show-effective-route-table -n spoke1-vmVMNic -g $rg -o table
+az network nic show-effective-route-table -n spoke2-vmVMNic -g $rg -o table
+
+az network nic show-effective-route-table -n spoke21-vmVMNic -g $rg -o table
+az network nic show-effective-route-table -n spoke22-vmVMNic -g $rg -o table
+
+az network nic show-effective-route-table -n hub1nvaVMNic -g $rg -o table
+
+az network nic show-effective-route-table -n hub2nvaVMNic -g $rg -o table
+
+az network routeserver peering list-learned-routes -n hub1nva --vrouter-name rshub1 -g $rg --query 'RouteServiceRole_IN_0' -o table
+az network routeserver peering list-learned-routes -n nvahub2 --vrouter-name rshub1 -g $rg --query 'RouteServiceRole_IN_0' -o table
+
+az network routeserver peering list-learned-routes -n hub2nva --vrouter-name rshub2 -g $rg --query 'RouteServiceRole_IN_0' -o table
+az network routeserver peering list-learned-routes -n nvahub1 --vrouter-name rshub2 -g $rg --query 'RouteServiceRole_IN_0' -o table

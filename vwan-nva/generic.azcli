@@ -1,0 +1,160 @@
+#source: https://raw.githubusercontent.com/erjosito/azcli/master/routeserver.azcli
+subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
+#select subscription
+az account set --subscription "$subscription"
+
+# variables
+rg=az-routeserver
+location=westeurope
+vnet_name=routeserver
+vnet_prefix=10.0.0.0/16
+subnet_name=routeserver
+subnet_prefix=10.0.0.0/24
+vr_name=myRouteServer
+# GatewaySubnet
+gw_subnet_prefix=10.0.254.0/24
+# CSR
+csr_subnet_name=csr
+csr_subnet_prefix=10.0.1.0/24
+csr_default_gw=10.0.1.1
+csr_bgp_ip=10.0.1.10
+# FW NVA
+fw_subnet_name=fw
+fw_subnet_prefix=10.0.2.0/24
+
+# Create Vnet
+az group create -n $rg -l $location
+az network vnet create -g $rg -n $vnet_name --address-prefix $vnet_prefix --subnet-name $subnet_name --subnet-prefix $subnet_prefix
+
+# Create hub subnets (no subnet can be created while the route server is being provisioned)
+az network vnet subnet create -n $csr_subnet_name --address-prefix $csr_subnet_prefix --vnet-name $vnet_name -g $rg
+az network vnet subnet create -n $fw_subnet_name --address-prefix $fw_subnet_prefix --vnet-name $vnet_name -g $rg
+az network vnet subnet create -n GatewaySubnet --address-prefix $gw_subnet_prefix --vnet-name $vnet_name -g $rg
+
+# Create Route Server
+subnet_id=$(az network vnet subnet show -n $subnet_name --vnet-name $vnet_name -g $rg --query id -o tsv)
+az network vrouter create -n $vr_name -g $rg --hosted-subnet $subnet_id -l $location# --no-wait
+
+# Create NVA
+az vm create -n generic-nva -g $rg -l $location --image ubuntuLTS --generate-ssh-keys \
+    --public-ip-address generic-nva-pip --vnet-name $vnet_name --size Standard_B1s --subnet $fw_subnet_name
+pip=$(az network public-ip show -n generic-nva-pip -g $rg --query ipAddress -o tsv)
+
+nva_nic_id=$(az vm show -n generic-nva  -g "$rg" --query 'networkProfile.networkInterfaces[0].id' -o tsv)
+az network nic update --ids $nva_nic_id --ip-forwarding
+
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+echo $pip
+
+#https://blog.marquis.co/configuring-bgp-using-bird-on-ubuntu-14-04lts/
+ssh azadmin@$pip
+sudo apt-get update
+#bird
+# https://bird.network.cz/pipermail/bird-users/2020-August/014770.html
+wget http://archive.ubuntu.com/ubuntu/pool/main/i/init-system-helpers/init-system-helpers_1.57_all.deb
+sudo dpkg -i init-system-helpers_1.57_all.deb
+
+sudo apt-get install bird2
+#IP forwarding
+cat /etc/sysctl.conf
+sudo sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/' /etc/sysctl.conf
+sudo sysctl -p
+
+sudo cp /etc/bird/bird.conf /etc/bird/bird.old.conf
+
+sudo mkdir -p /var/log/bird
+sudo chown bird: /var/log/bird
+sudo chown bird: /var/log/bird/bird.log
+
+azadmin@generic-nva:~$ sudo cat /etc/bird/bird.conf
+log syslog all;
+router id 198.51.100.1;
+
+protocol device {
+        scan time 10;           # Scan interfaces every 10 seconds
+}
+
+# Disable automatically generating direct routes to all network interfaces.
+protocol direct {
+        disabled;               # Disable by default
+}
+
+# Forbid synchronizing BIRD routing tables with the OS kernel.
+protocol kernel {
+      import all;      # Import to table, default is import all
+      export all;      # Export to protocol. default is export none
+}
+
+# Static IPv4 routes.
+protocol static {
+      route 2.2.2.2/32 via 10.1.10.1;
+}
+
+# BGP peers
+protocol bgp uplink0 {
+      description "RouteServer instance 0";
+      multihop;
+      local 10.0.2.4 as 65500;
+      neighbor 10.0.1.10 as 65000;
+      import filter {accept;};
+      export filter {accept;};
+}
+
+
+
+
+invoke-rc.d bird start
+
+#birdc commands
+show protocols all bgp1
+show route
+
+
+#install StrongSwan
+apt-get install strongswan libcharon-extra-plugins strongswan-pki -y
+#strongswan-plugin-eap-mschapv2 ?
+
+sudo apt-get install certbot
+#requires NSG to be open on port 80 (or should we do HTTPs? )
+vpndomain=vpn.setspn.be.eu.org
+sudo certbot certonly --standalone -d $vpndomain --agree-tos --register-unsafely-without-email
+
+#/etc/letsencrypt/live/vpn.setspn.be.eu.org/fullchain.pem
+#Your key file has been saved at:
+#/etc/letsencrypt/live/vpn.setspn.be.eu.org/privkey.pem
+
+sudo cp /etc/letsencrypt/live/$vpndomain/fullchain.pem /etc/ipsec.d/certs/
+sudo cp /etc/letsencrypt/live/$vpndomain/privkey.pem /etc/ipsec.d/private/
+sudo cp /etc/letsencrypt/live/$vpndomain/chain.pem /etc/ipsec.d/cacerts/
+
+# Create CSR as BGP buddy
+csr_asn=65515
+publisher=cisco
+offer=cisco-csr-1000v
+sku=16_12-byol
+csr_username=azadmin
+csr_password=Microsoft123!
+version=$(az vm image list -p $publisher -f $offer -s $sku --all --query '[0].version' -o tsv)
+az vm image terms accept --urn ${publisher}:${offer}:${sku}:${version}
+az vm create -n csr-nva -g $rg -l $location \
+    --image ${publisher}:${offer}:${sku}:${version} \
+    --admin-username "$csr_username" --admin-password $csr_password --authentication-type all --generate-ssh-keys \
+    --public-ip-address csr-pip --public-ip-address-allocation static \
+    --vnet-name $vnet_name --subnet $csr_subnet_name \
+    --private-ip-address $csr_bgp_ip
+csr_nic_id=$(az vm show -n csr-nva -g "$rg" --query 'networkProfile.networkInterfaces[0].id' -o tsv)
+az network nic update --ids $csr_nic_id --ip-forwarding
+
+router bgp ?
+  neighbor ?.?.?.? remote-as ?
+  neighbor ?.?.?.? ebgp-multihop 5
+  neighbor ?.?.?.? update-source GigabitEthernet1
+
+router bgp 65000
+  network 10.60.0.0 mask 255.255.0.0
+  neighbor 10.0.2.4 remote-as 65500
+  neighbor 10.0.2.4 ebgp-multihop 5
+  neighbor 10.0.2.4 update-source GigabitEthernet1
+  
+  ip route 10.60.0.0 255.255.0.0 10.0.1.1

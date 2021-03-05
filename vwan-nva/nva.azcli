@@ -1,0 +1,120 @@
+subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
+#select subscription
+az account set --subscription "$subscription"
+location=westcentralus
+rg=az-vwannva
+
+# Create Vnet
+az group create -n $rg -l $location
+
+az account list-locations -o table
+
+az network virtual-appliance create --name nva -g $rg \
+     --scale-unit 2 \
+     --vendor SilverPeakEdgeConnect \
+     --version latest \
+     --vhub "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva/providers/Microsoft.Network/virtualHubs/vhub" \
+     --asn 65100 \
+     --init-config "echo hello:"
+    
+az network virtual-appliance create --name nva -g $rg \
+     --scale-unit 2 \
+     --vendor SilverPeakEdgeConnect \
+     --version latest \
+     --vhub vhub \
+     --asn 65100
+                                    
+az network virtual-appliance sku list -o table
+
+az network virtual-appliance show --name nva -g $rg
+
+#try as a VMSS
+#does it fail when the tags are not specified?
+
+az vm image list --output table --all
+
+#"Publisher:Offer:Sku:Version"
+
+#specimage=
+
+#az vmss create \
+  #--resource-group $rg \
+  #--location $location
+  #--name spec \
+  #--image $specimage \
+  #--admin-username azureuser \
+  #--generate-ssh-keys \
+  #--enable-agent false
+
+#info
+
+{
+"Publisher": "silver-peak-systems",
+"Offer": "silver_peak_edgeconnect_vwan",
+"Vendor": "SilverPeakEdgeConnect",
+"Sku": "silver_peak_edgeconnect_vwan_8_1_9_4",
+"Properties": {
+"AvailableVersions": [ "latest"],
+"AvailableScaleUnits": [
+{
+"ScaleUnit": "2",
+"VmSku": "Standard_D2_v2",
+"InstanceCount": "2"
+}
+],
+"AllowedInboundPorts": [ "22,443" ],
+"AllowedOutboundPorts": [ "*" ]
+}
+}
+
+# request
+
+resources.azure.com/raw
+
+PUT https://management.azure.com/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva/providers/Microsoft.Network/networkVirtualAppliances/nva?api-version=2020-07-01
+
+{ 
+    "properties": { 
+        "nvaSku": { 
+            "vendor": "SilverPeakEdgeConnect", 
+            "bundledScaleUnit": "2", 
+            "marketPlaceVersion": "latest" 
+        }, 
+        "virtualHub": { 
+            "id": "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva/providers/Microsoft.Network/virtualHubs/vhub" 
+        }, 
+        "virtualApplianceAsn": 64512, 
+        "cloudInitConfiguration": "echo hello" 
+    }, 
+    "id": "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva/providers/Microsoft.Network/networkVirtualAppliances/nva", 
+    "name": "nva", 
+    "type": "Microsoft.Network/NetworkVirtualAppliances", 
+    "location": "westcentralus" 
+} 
+
+                    "imageReference": {
+                        "publisher": "silver-peak-systems",
+                        "offer": "silver_peak_edgeconnect",
+                        "sku": "silver_peak_edgeconnect_8_1_9_4",
+                        "version": "8.1.9"
+                    }
+
+
+
+
+    
+
+Deploy the NVA with Azure CLI 
+
+As an alternative to calling the REST API you can leverage the Azure CLI. Taking into account the above example values: 
+
+az network virtual-appliance create --name mytestnva -g vwanrg \
+     --scale-unit 2 \
+     --vendor ContosoSDWAN \
+     --version latest \
+     --vhub "/subscriptions/XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX/resourceGroups/vwanrg/providers/Microsoft.Network/virtualHubs/contosohub" \
+     --asn 64512 \
+     --init-config "echo hello"
+
+
+ az network virtual-appliance show --name mytestnva -g vwanrg
