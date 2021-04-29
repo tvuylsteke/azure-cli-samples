@@ -86,6 +86,10 @@ EOF
 
 echo $cloudinit
 
+cat $gnva_cloudinit 
+test=$(base64 $gnva_cloudinit)
+echo $test
+
 
 #!/bin/sh
 cat $gnva_cloudinit | python -c 'import json, sys; print( json.dumps( sys.stdin.read() ) )'
@@ -96,8 +100,8 @@ az network virtual-appliance create --name $nva -g $rg \
      --version latest \
      --vhub $hub \
      --asn 65100 \
-     --init-config $output \
-     --tags accountName="Silver Peak Eng - Dinesh Fernando" accountKey="ZUR8wU0B6611RSk3Gqp1ctk500jLrqnL"
+     --init-config "$test" \
+     --tags accountName="sp-d" accountKey="xyz"
 
 az network virtual-appliance show --name $nva -g $rg 
 az network virtual-appliance delete --name $nva -g $rg 
