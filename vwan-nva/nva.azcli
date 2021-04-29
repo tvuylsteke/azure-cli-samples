@@ -25,7 +25,7 @@ az network virtual-appliance create --name nvasp2 -g $rg \
      --vhub "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva/providers/Microsoft.Network/virtualHubs/we-hub2" \
      --asn 65100 \
      --init-config "echo hello" \     
-     --tags accountName="Silver Peak Eng - Dinesh Fernando" accountKey="ZUR8wU0B6611RSk3Gqp1ctk500jLrqnL"
+     --tags accountName="spy" accountKey="xxx"
      
 --properties.SSHPublicKey "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC+OLyFTWdhcfLkKIWRbwbMdXsmlqEZFH2sJfQgWlw+yrqJumnZ18K1K7RKISvXiaa2Ij/cmts1exwzf/OHwwiIGYxliL77wRvxYu52CXw2KmWTfp8YXcwhXZFXtiKHYAIQvEhVYOtShR5labsz1fsWMcBKRuxvmMvZuaRt4Rl3q20m1sfNgnL300CI2E5tkCEcvUKadVA5IU6hbEQBqYZzaKjP+ra2WqjkOZ8dSraOQB1COfRmXncLl4wImuNyORDFhbfD89yX+Xp1od7Earz6MrjPG1irddcD5Zd4qYMyfCeUqad3awxmWmO4H11lzYBz8w9CBLUh0Aio/3mmuFid" \
     
