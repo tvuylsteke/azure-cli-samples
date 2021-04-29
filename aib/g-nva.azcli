@@ -1,7 +1,4 @@
-subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
-admin_password=Microsoft123!
-admin_user=azadmin
-
+subscription="Azure CXP FTA Internal Subscription THOVUY SIG"
 az account set --subscription "$subscription"
 
 az feature register --namespace Microsoft.VirtualMachineImages --name VirtualMachineTemplatePreview
@@ -11,16 +8,17 @@ az provider show -n Microsoft.VirtualMachineImages -o json | grep registrationSt
 az provider show -n Microsoft.KeyVault -o json | grep registrationState
 az provider show -n Microsoft.Compute -o json | grep registrationState
 az provider show -n Microsoft.Storage -o json | grep registrationState
+az provider show -n Microsoft.Network -o json | grep registrationState
 
 az provider register -n Microsoft.VirtualMachineImages
 az provider register -n Microsoft.Compute
 az provider register -n Microsoft.KeyVault
 az provider register -n Microsoft.Storage
+az provider register -n Microsoft.Network
 
-az account show -o json | grep id
-subscriptionID="8ae4f1ad-5738-40b4-bf47-dec771721337"
+subscriptionID=$(az account show --query id --output tsv)
 # Resource group name - we are using ibLinuxGalleryRG in this example
-sigResourceGroup=az-gnva-image
+sigResourceGroup=g_nva-image
 # Datacenter location - we are using West US 2 in this example
 location="westcentralus"
 # name of the shared image gallery - in this example we are using myGallery
@@ -89,7 +87,41 @@ sed -i -e "s%<imgBuilderId>%$imgBuilderId%g" helloImageTemplateforSIG.json
 
 az resource create \
     --resource-group $sigResourceGroup \
-    --properties @helloImageTemplateforSIG.json \
+    --properties @imageTemplateforSIG.json \
     --is-full-object \
     --resource-type Microsoft.VirtualMachineImages/imageTemplates \
-    -n helloImageTemplateforSIG01
+    -n g_nva-image
+
+az resource invoke-action \
+     --resource-group $sigResourceGroup \
+     --resource-type  Microsoft.VirtualMachineImages/imageTemplates \
+     -n g_nva-image \
+     --action Run
+
+#test image
+az vm create \
+  --resource-group $sigResourceGroup \
+  --name myAibGalleryVM \
+  --admin-username aibuser \
+  --location $location \
+  --image "/subscriptions/$subscriptionID/resourceGroups/$sigResourceGroup/providers/Microsoft.Compute/galleries/$sigName/images/$imageDefName/versions/latest" \
+  --generate-ssh-keys
+
+  #add additional region
+  az sig image-version update \
+   --resource-group $sigResourceGroup \
+   --gallery-name $sigName \
+   --gallery-image-definition $imageDefName \
+   --gallery-image-version 0.1.0 \
+   --add publishingProfile.targetRegions  name=eastus2euap
+
+     #add additional region
+  az sig image-version update \
+   --resource-group $sigResourceGroup \
+   --gallery-name $sigName \
+   --gallery-image-definition $imageDefName \
+   --gallery-image-version 0.1.0 \
+   --add publishingProfile.targetRegions  name=eastus2
+
+
+#read access to GatewayRP and ProdGwmKv

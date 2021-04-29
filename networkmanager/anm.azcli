@@ -1,0 +1,101 @@
+#ANM created in this one
+subscription="MSDN THOVUY P45"
+az account set --subscription "$subscription"
+
+#location=westcentralus
+#rg=az-networkmanager
+#az group create -n $rg -l $location
+
+#our scope is this one
+#subscription="MSDN THOVUY P130b"
+#az account set --subscription "$subscription"
+
+location=westcentralus
+rg=az-networkmanager-resources
+az group create -n $rg -l $location
+
+# Create Vnet #1
+vnet_name=prod-spoke1
+vnet_prefix=10.1.1.0/24
+# test VM
+vm_subnet_prefix=10.1.1.0/25
+vm_subnet_name=vm
+vm_name=spoke1vm
+
+# Create Vnet
+az network vnet create -g $rg -n $vnet_name --address-prefix $vnet_prefix --subnet-name $vm_subnet_name --subnet-prefix $vm_subnet_prefix
+
+# create VM
+az vm create -n $vm_name -g $rg -l $location --image ubuntuLTS --generate-ssh-keys \
+    --public-ip-address $vm_name-pip --vnet-name $vnet_name --size Standard_B1s --subnet $vm_subnet_name
+pip=$(az network public-ip show -n $vm_name-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+# Create Vnet #2
+vnet_name=prod-spoke2
+vnet_prefix=10.1.2.0/24
+# test VM
+vm_subnet_prefix=10.1.2.0/25
+vm_subnet_name=vm
+vm_name=spoke2vm
+
+# Create Vnet
+az network vnet create -g $rg -n $vnet_name --address-prefix $vnet_prefix --subnet-name $vm_subnet_name --subnet-prefix $vm_subnet_prefix
+
+# create VM
+az vm create -n $vm_name -g $rg -l $location --image ubuntuLTS --generate-ssh-keys \
+    --public-ip-address $vm_name-pip --vnet-name $vnet_name --size Standard_B1s --subnet $vm_subnet_name
+pip=$(az network public-ip show -n $vm_name-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+# Create Vnet #3
+vnet_name=prod-spoke3
+vnet_prefix=10.1.3.0/24
+# test VM
+vm_subnet_prefix=10.1.3.0/25
+vm_subnet_name=vm
+vm_name=spoke3vm
+
+# Create Vnet
+az network vnet create -g $rg -n $vnet_name --address-prefix $vnet_prefix --subnet-name $vm_subnet_name --subnet-prefix $vm_subnet_prefix
+
+# create VM
+az vm create -n $vm_name -g $rg -l $location --image ubuntuLTS --generate-ssh-keys \
+    --public-ip-address $vm_name-pip --vnet-name $vnet_name --size Standard_B1s --subnet $vm_subnet_name
+pip=$(az network public-ip show -n $vm_name-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+# Create Vnet #4
+vnet_name=prod-spoke4
+vnet_prefix=10.1.4.0/24
+# test VM
+vm_subnet_prefix=10.1.4.0/25
+vm_subnet_name=vm
+vm_name=spoke4vm
+
+# Create Vnet
+az network vnet create -g $rg -n $vnet_name --address-prefix $vnet_prefix --subnet-name $vm_subnet_name --subnet-prefix $vm_subnet_prefix
+
+# create VM
+az vm create -n $vm_name -g $rg -l $location --image ubuntuLTS --generate-ssh-keys \
+    --public-ip-address $vm_name-pip --vnet-name $vnet_name --size Standard_B1s --subnet $vm_subnet_name
+pip=$(az network public-ip show -n $vm_name-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+#ANM commands
+anm_name="anm3"
+rg=az-networkmanager
+az networkmanager network-manager show --name $anm_name -g $rg
+az networkmanager network-manager update --name $anm_name -g $rg --network-manager-scopes subscriptions="/subscriptions/af2f6ce8-e4f3-491d-92a5-34ab4ce9c7d3"
+
+
+az networkmanager security-configuration show --configuration-name "baseline" --network-manager-name $anm_name -g $rg
+az networkmanager security-configuration-rule list --configuration-name "baseline" --network-manager-name $anm_name -g $rg -o table
+
+
+Show a rule
+az networkmanager security-configuration-rule show --configuration-name 
+"myTestSecurityConfig" --network-manager-name "test123" --resource-group "AnmTests" --
+rule-name "testRule"
+#List security rules in a security configuration
+

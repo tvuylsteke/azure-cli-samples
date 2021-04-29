@@ -1,0 +1,137 @@
+// DNS proxy log data 
+// Parses the DNS proxy log data. 
+AzureDiagnostics
+| where Category == "AzureFirewallDnsProxy"
+//using :int makes it easier to pars but later we'll convert to string as we're not interested to do mathematical functions on these fields
+//DNS Request: 10.1.1.5:58101 - 45353 AAAA IN api.azfw.dns. udp 30 false 512 NOERROR qr,rd,ra 127 2.004740184s
+//DNS Request: 10.1.1.8:12774 - 42904 A IN api.azfw.dns. udp 30 false 512 NOERROR qr,aa,rd,ra 58 0.000074601s
+| parse msg_s with "DNS Request: " SourceIP ":" SourcePortInt:int " - " UnknownPortInt:int " " RecordType " " direction " " hostname " " protocol " " details
+| extend
+TotalTime = extract("[0-9]*.?[0-9]+s$", 0, msg_s),
+SourcePort = tostring(SourcePortInt),
+UnknownPort =  tostring(UnknownPortInt)
+//all fields
+//| project TimeGenerated,SourceIP,SourcePort,UnknownPort,hostname,RecordType,direction,protocol,TotalTime,details,msg_s
+//all usefull fields
+| project TimeGenerated,SourceIP,hostname,RecordType,TotalTime,details,msg_s
+| order by TimeGenerated
+
+
+// Network rule log data 
+// Parses the network rule log data. 
+AzureDiagnostics
+| where Category == "AzureFirewallNetworkRule"
+//using :int makes it easier to pars but later we'll convert to string as we're not interested to do mathematical functions on these fields
+//case 1: for records that look like this:
+//TCP request from 10.0.2.4:51990 to 13.69.65.17:443. Action: Deny//Allow
+//UDP request from 10.0.3.4:123 to 51.141.32.51:123. Action: Deny/Allow
+//TCP request from 193.238.46.72:50522 to 40.119.154.83:3389 was DNAT'ed to 10.0.2.4:3389
+| parse msg_s with Protocol " request from " SourceIP ":" SourcePortInt:int " to " TargetIP ":" TargetPortInt:int *
+//case 1c: for IDS rules
+//TCP request from 10.1.1.5:41663 to 20.54.144.51:80. Action: alert. Signature: 2013504. IDS: POLICY GNU/Linux APT User-Agent Outbound likely related to package management. Priority: 3. Classification: Not Suspicious Traffic
+//TCP request from 10.1.0.4:55108 to 104.21.192.31:80. Action: drop. Signature: 2008983. IDS: USER_AGENTS Suspicious User Agent (BlackSun). Priority: 1. Classification: A Network Trojan was detected
+| parse msg_s with * ". Action: " Action1a ". Signature: " IDSSignatureIDInt ". IDS: " IDSSignatureDescription ". Priority: " IDSPriorityInt ". Classification: " IDSClassification
+//case 1a: for regular network rules
+//TCP request from 10.0.2.4:51990 to 13.69.65.17:443. Action: Deny/Allow
+//UDP request from 10.0.3.4:123 to 51.141.32.51:123. Action: Deny/Allow
+| parse msg_s with * ". Action: " Action1c
+//case 1b: for NAT rules
+//TCP request from 193.238.46.72:50522 to 40.119.154.83:3389 was DNAT'ed to 10.0.2.4:3389
+| parse msg_s with * " was " Action1b " to " NatDestination
+//case 2: for ICMP records
+//ICMP request from 10.0.2.4 to 10.0.3.4. Action: Allow
+| parse msg_s with Protocol2 " request from " SourceIP2 " to " TargetIP2 ". Action: " Action2
+| extend
+SourcePort = tostring(SourcePortInt),
+TargetPort = tostring(TargetPortInt),
+IDSSignatureID = tostring(IDSSignatureIDInt),
+IDSPriority = tostring(IDSPriorityInt)
+| extend 
+    Action = case(Action1a == "", case(Action1b == "",case(Action1c == "",Action2,Action1c),Action1b), Action1a),    
+    Protocol = case(Protocol == "", Protocol2, Protocol),
+    SourceIP = case(SourceIP == "", SourceIP2, SourceIP),
+    TargetIP = case(TargetIP == "", TargetIP2, TargetIP),
+    //ICMP records don't have port information
+    SourcePort = case(SourcePort == "", "N/A", SourcePort),
+    TargetPort = case(TargetPort == "", "N/A", TargetPort),
+    //Regular network rules don't have a DNAT destination
+    NatDestination = case(NatDestination == "", "N/A", NatDestination)
+| project TimeGenerated, msg_s, Protocol, SourceIP,SourcePort,TargetIP,TargetPort,Action, NatDestination, OperationName,IDSSignatureID,IDSSignatureDescription,IDSPriority,IDSClassification
+| order by TimeGenerated
+
+
+
+// Application rule log data 
+// Parses the application rule log data. 
+// Application rule log data 
+// Parses the application rule log data. 
+AzureDiagnostics
+| where Category == "AzureFirewallApplicationRule"
+//using :int makes it easier to pars but later we'll convert to string 
+//as we're not interested to do mathematical functions on these fields
+//this first parse statement is valid for all entries as they all start with this format
+| parse msg_s with Protocol " request from " SourceIP ":" SourcePortInt:int *
+//no period after sourceport
+| parse msg_s with Protocol " request from " SourceIPtemp ":" SourcePortInttemp:int " " TempDetails
+//. after sourceport
+//HTTPS request from 10.1.1.5:11291. Action: Deny. Reason: SNI TLS extension was missing
+| parse msg_s with Protocol " request from " SourceIPtemp ":" SourcePortInttemp:int "." TempDetails2
+//case 1: for records that end with: "was denied. Reason: SNI TLS extension was missing."
+//updated msg now ends with:  "Action: Deny. Reason: SNI TLS extension was missing"
+| parse TempDetails2 with " Action: " Action1 ". Reason: " Rule1
+//case
+| parse TempDetails with "to " FQDN ":" TargetPortInt:int *
+//case 2: for records that end with
+//case 2a for entries without url
+//"to ocsp.digicert.com:80. Action: Allow. Rule Collection: RC1. Rule: Rule1"
+//"to v10.vortex-win.data.microsoft.com:443. Action: Deny. No rule matched. Proceeding with default action"
+| parse TempDetails with * ". Action: " Action2a "." *
+//case 2b for entries with url
+//"to ifconfig.co:80. Url: ifconfig.co. Action: Deny. No rule matched. Proceeding with default action"
+| parse TempDetails with * ". Url:" url "Action: " Action2b "." *
+//case 2a: for records that end with:
+//"to ocsp.digicert.com:80. Action: Allow. Rule Collection: RC1. Rule: Rule1"
+| parse TempDetails with * ". Rule Collection: " RuleCollection2a ". Rule:" Rule2a "Web Category: " WebCategory
+//case 2b: for records that end with:
+//for records that end with: "to v10.vortex-win.data.microsoft.com:443. Action: Deny. No rule matched. Proceeding with default action"
+| parse TempDetails with * "Deny." RuleCollection2b ". Proceeding with" Rule2b
+| extend SourcePort = tostring(SourcePortInt)
+|extend TargetPort = tostring(TargetPortInt)
+//make sure we only have Allowed / Deny in the Action Field
+| extend Action1 = case(Action1 == "Deny","Deny","Unknown Action")
+| extend Action = case(Action2a == "",case(Action2b == "",Action1,Action2b),Action2a),
+    Rule = case(Rule2a == "",case(Rule1 == "",case(Rule2b == "","N/A", Rule2b),Rule1),Rule2a), 
+    RuleCollection = case(RuleCollection2b == "",case(RuleCollection2a == "","No rule matched",RuleCollection2a),RuleCollection2b),
+    FQDN = case(FQDN == "", "N/A", FQDN),
+    TargetPort = case(TargetPort == "", "N/A", TargetPort)
+| project TimeGenerated, msg_s, Protocol, SourceIP, SourcePort, FQDN, TargetPort, url, Action ,RuleCollection, Rule, WebCategory
+| order by TimeGenerated
+
+
+TODO
+Web Category / rule collection
+HTTPS request from 10.1.0.4:57094 to www.nbcsports.com:443. Action: Allow. Rule Collection: prem-fw-pol:DefaultApplicationRuleCollectionGroup:apprc. Rule: cat. Web Category: Sports
+
+Rule missing / rule collection
+HTTPS request from 10.1.0.4:51730 to www.tweakers.net:443. Action: Allow. Rule Collection: prem-fw-pol:DefaultApplicationRuleCollectionGroup:apprc. Rule: fqdn
+HTTP request from 10.1.0.4:48998 to www.tweakers.net:80. Url: www.tweakers.net. Action: Allow. Rule Collection: prem-fw-pol:DefaultApplicationRuleCollectionGroup:apprc. Rule: fqdn
+
+// Application rule log data 
+// Parses the application rule log data. 
+AzureDiagnostics
+| where Category == "AzureFirewallApplicationRule"
+// normalize data so it's eassier to parse later
+| extend msg_s = replace(@'Reason: SNI TLS extension was missing.', @'Rule Collection: default behavior Rule: SNI TLS extension missing', msg_s)
+| extend msg_s = replace(@'No rule matched. Proceeding with default action', @'Rule Collection: default behavior Rule: no rule matched', msg_s)
+// extract web category, for now it's always add the end
+| parse msg_s with * " Web Category: " WebCategory
+// remove web category from msg_s before further parsing.
+| extend msg_s = replace(@'(. Web Category:).*','', msg_s)
+| parse msg_s with Protocol " request from " SourceIP ":" SourcePortInt:int *
+| parse msg_s with * "to " FQDN ":" TargetPortInt:int *
+| parse msg_s with * " Action: " Action ". Rule Collection: " RuleCollection " Rule: " Rule
+| parse msg_s with * "Url: " URL ". Action:" *
+| extend SourcePort = tostring(SourcePortInt)
+| extend TargetPort = tostring(TargetPortInt)
+| project TimeGenerated, Protocol, SourceIP, SourcePort, FQDN, TargetPort, URL, Action ,RuleCollection, Rule, WebCategory
+| order by TimeGenerated

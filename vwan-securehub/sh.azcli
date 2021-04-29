@@ -1,0 +1,268 @@
+#source: https://raw.githubusercontent.com/erjosito/azcli/master/vwan_2xshub.azcli
+subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
+az account set --subscription "$subscription"
+
+# Variables
+rg=vwan-securehub
+vwan=vwan
+location1=westeurope
+location2=westus2
+password=Microsoft123!
+vwan_hub1_prefix=192.168.1.0/24
+vwan_hub2_prefix=192.168.2.0/24
+username=azadmin
+vm_size=Standard_B1s
+nva_size=Standard_B2ms
+
+# Start: create RG
+az group create -n $rg -l $location1
+
+# vwan and hubs
+az network vwan create -n $vwan -g $rg -l $location1 --branch-to-branch-traffic true --type Standard
+az network vhub create -n hub1 -g $rg --vwan $vwan -l $location1 --address-prefix $vwan_hub1_prefix
+az network vhub create -n hub2 -g $rg --vwan $vwan -l $location2 --address-prefix $vwan_hub2_prefix
+
+# Create RT for vnets
+#az network vhub route-table create -n hub1Vnet --vhub-name hub1 -g $rg --labels vnet nohub2
+#az network vhub route-table create -n hub2Vnet --vhub-name hub2 -g $rg --labels vnet nohub1
+
+# Add nohub1/nohub2 labels to default RTs
+#az network vhub route-table update -n defaultRouteTable --vhub-name hub1 -g $rg --labels default nohub2
+#az network vhub route-table update -n defaultRouteTable --vhub-name hub2 -g $rg --labels default nohub1
+
+# Create Azure Firewall policy with sample policies
+azfw_policy_name=vwanfwpolicy
+az network firewall policy create -n $azfw_policy_name -g $rg
+az network firewall policy rule-collection-group create -n ruleset01 --policy-name $azfw_policy_name -g $rg --priority 100
+# Allow SSH and HTTP for connection monitor (uses TCP9 too)
+echo "Creating rule to allow SSH and HTTP..."
+az network firewall policy rule-collection-group collection add-filter-collection --policy-name $azfw_policy_name --rule-collection-group-name ruleset01 -g $rg \
+    --name mgmt --collection-priority 101 --action Allow --rule-name allowSSHnHTTP --rule-type NetworkRule --description "TCP 22" \
+    --destination-addresses 10.0.0.0/8 172.16.0.0/12 20.0.0.0/6 --source-addresses 10.0.0.0/8 172.16.0.0/12 20.0.0.0/6 --ip-protocols TCP --destination-ports 9 22 80
+# Allow ICMP
+# echo "Creating rule to allow ICMP..."
+# az network firewall policy rule-collection-group collection add-filter-collection --policy-name $azfw_policy_name --rule-collection-group-name ruleset01 -g $rg \
+#     --name icmp --collection-priority 102 --action Allow --rule-name allowICMP --rule-type NetworkRule --description "ICMP traffic" \
+#     --destination-addresses 10.0.0.0/8 172.16.0.0/12 20.0.0.0/6 --source-addresses 10.0.0.0/8 172.16.0.0/12 20.0.0.0/6 --ip-protocols ICMP --destination-ports "1-65535" >/dev/null
+# Allow NTP
+echo "Creating rule to allow NTP..."
+az network firewall policy rule-collection-group collection add-filter-collection --policy-name $azfw_policy_name --rule-collection-group-name ruleset01 -g $rg \
+    --name ntp --collection-priority 103 --action Allow --rule-name allowNTP --rule-type NetworkRule --description "Egress NTP traffic" \
+    --destination-addresses '*' --source-addresses "10.0.0.0/8" "20.0.0.0/6" --ip-protocols UDP --destination-ports "123"
+# Example application collection with 2 rules (ipconfig.co, api.ipify.org)
+echo "Creating rule to allow ifconfig.co and api.ipify.org..."
+az network firewall policy rule-collection-group collection add-filter-collection --policy-name $azfw_policy_name --rule-collection-group-name ruleset01 -g $rg \
+    --name ifconfig --collection-priority 201 --action Allow --rule-name allowIfconfig --rule-type ApplicationRule --description "ifconfig" \
+    --target-fqdns "ifconfig.co" --source-addresses "10.0.0.0/8" "172.16.0.0/12" "20.0.0.0/6" --protocols Http=80 Https=443
+az network firewall policy rule-collection-group collection rule add -g $rg --policy-name $azfw_policy_name --rule-collection-group-name ruleset01 --collection-name ifconfig \
+    --name ipify --target-fqdns "api.ipify.org" --source-addresses "10.0.0.0/8" "172.16.0.0/12" "20.0.0.0/6" --protocols Http=80 Https=443 --rule-type ApplicationRule
+# Example application collection with wildcards (*.ubuntu.com)
+echo "Creating rule to allow *.ubuntu.com..."
+az network firewall policy rule-collection-group collection add-filter-collection --policy-name $azfw_policy_name --rule-collection-group-name ruleset01 -g $rg \
+    --name ubuntu --collection-priority 202 --action Allow --rule-name repos --rule-type ApplicationRule --description "ubuntucom" \
+    --target-fqdns 'ubuntu.com' '*.ubuntu.com' --source-addresses '*' --protocols Http=80 Https=443
+# Mgmt traffic to Azure
+az network firewall policy rule-collection-group collection add-filter-collection --policy-name $azfw_policy_name --rule-collection-group-name ruleset01 -g $rg \
+    --name azure --collection-priority 203 --action Allow --rule-name azmonitor --rule-type ApplicationRule --description "Azure Monitor" \
+    --target-fqdns '*.opinsights.azure.com' '*.azure-automation.net' --source-addresses '*' --protocols Https=443
+
+# Create Azure Firewalls in the virtual hubs
+az network firewall create -n azfw1 -g $rg --vhub hub1 --policy $azfw_policy_name -l $location1 --sku AZFW_Hub --public-ip-count 1
+az network firewall create -n azfw2 -g $rg --vhub hub2 --policy $azfw_policy_name -l $location2 --sku AZFW_Hub --public-ip-count 1
+
+# Configure static routes to firewall in the VWAN hub route tables
+azfw1_id=$(az network firewall show -n azfw1 -g $rg --query id -o tsv)
+az network vhub route-table route add -n defaultRouteTable --vhub-name hub1 -g $rg \
+    --route-name default --destination-type CIDR --destinations "0.0.0.0/0" "10.0.0.0/8" \
+    --next-hop-type ResourceId --next-hop $azfw1_id
+az network vhub route-table route add -n hub1Vnet --vhub-name hub1 -g $rg \
+    --route-name default --destination-type CIDR --destinations "0.0.0.0/0" "10.0.0.0/8" "172.16.0.0/12" \
+    --next-hop-type ResourceId --next-hop $azfw1_id
+
+azfw2_id=$(az network firewall show -n azfw2 -g $rg --query id -o tsv)
+az network vhub route-table route add -n defaultRouteTable --vhub-name hub2 -g $rg \
+    --route-name default --destination-type CIDR --destinations "0.0.0.0/0" "10.0.0.0/8" \
+    --next-hop-type ResourceId --next-hop $azfw2_id
+az network vhub route-table route add -n hub2Vnet --vhub-name hub2 -g $rg \
+    --route-name default --destination-type CIDR --destinations "0.0.0.0/0" "10.0.0.0/8" "172.16.0.0/12" \
+    --next-hop-type ResourceId --next-hop $azfw2_id
+
+# Configure Azure Firewalls to log to Azure Monitor
+# Create LA workspace if it doesnt exist
+logws_name=$(az monitor log-analytics workspace list -g $rg --query '[0].name' -o tsv)
+if [[ -z "$logws_name" ]]
+then
+    logws_name=vwanlogs$RANDOM
+    echo "Creating log analytics workspace $logws_name..."
+    az monitor log-analytics workspace create -n $logws_name -g $rg -l $location1
+fi
+logws_id=$(az resource list -g $rg -n $logws_name --query '[].id' -o tsv)
+logws_customerid=$(az monitor log-analytics workspace show -n $logws_name -g $rg --query customerId -o tsv)
+# Azure Firewalls
+echo "Configuring Azure Firewalls..."
+fw_id_list=$(az network firewall list -g $rg --query '[].id' -o tsv)
+while IFS= read -r fw_id; do
+    az monitor diagnostic-settings create -n mydiag --resource $fw_id --workspace $logws_id \
+        --metrics '[{"category": "AllMetrics", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false }, "timeGrain": null}]' \
+        --logs '[{"category": "AzureFirewallApplicationRule", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false}}, 
+                {"category": "AzureFirewallNetworkRule", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false}}]' >/dev/null
+done <<< "$fw_id_list"
+
+# Create cloudinit file:
+cloudinit_file=/tmp/cloudinit.txt
+cat <<EOF > $cloudinit_file
+#cloud-config
+package_upgrade: true
+packages:
+  - apache2
+EOF
+
+# Spoke11 in location1
+spoke_id=11
+vnet_prefix=10.1.1.0/24
+subnet_prefix=10.1.1.0/26
+az vm create -n spoke${spoke_id}-vm -g $rg -l $location1 --image ubuntuLTS --admin-username $username --generate-ssh-keys \
+    --public-ip-address spoke${spoke_id}-pip --vnet-name spoke${spoke_id}-$location1 --size $vm_size \
+    --vnet-address-prefix $vnet_prefix --subnet vm --subnet-address-prefix $subnet_prefix --custom-data $cloudinit_file
+az vm extension set --vm-name spoke${spoke_id}-vm -g $rg -n NetworkWatcherAgentLinux --publisher Microsoft.Azure.NetworkWatcher --version 1.4
+az network vhub connection create -n spoke${spoke_id} -g $rg --vhub-name hub1 --remote-vnet spoke${spoke_id}-$location1
+
+# Spoke12 in location1
+spoke_id=12
+vnet_prefix=10.1.2.0/24
+subnet_prefix=10.1.2.0/26
+az vm create -n spoke${spoke_id}-vm -g $rg -l $location1 --image ubuntuLTS --admin-username $username --generate-ssh-keys \
+    --public-ip-address spoke${spoke_id}-pip --vnet-name spoke${spoke_id}-$location1 --size $vm_size \
+    --vnet-address-prefix $vnet_prefix --subnet vm --subnet-address-prefix $subnet_prefix --custom-data $cloudinit_file
+az vm extension set --vm-name spoke${spoke_id}-vm -g $rg -n NetworkWatcherAgentLinux --publisher Microsoft.Azure.NetworkWatcher --version 1.4
+az network vhub connection create -n spoke${spoke_id} -g $rg --vhub-name hub1 --remote-vnet spoke${spoke_id}-$location1
+
+# Spoke21 in location2
+spoke_id=21
+vnet_prefix=10.2.1.0/24
+subnet_prefix=10.2.1.0/26
+az vm create -n spoke${spoke_id}-vm -g $rg -l $location2 --image ubuntuLTS --admin-username $username --generate-ssh-keys --size $vm_size \
+    --public-ip-address spoke${spoke_id}-pip --vnet-name spoke${spoke_id}-$location2 \
+    --vnet-address-prefix $vnet_prefix --subnet vm --subnet-address-prefix $subnet_prefix --custom-data $cloudinit_file
+az vm extension set --vm-name spoke${spoke_id}-vm -g $rg -n NetworkWatcherAgentLinux --publisher Microsoft.Azure.NetworkWatcher --version 1.4
+az network vhub connection create -n spoke${spoke_id} -g $rg --vhub-name hub2 --remote-vnet spoke${spoke_id}-$location2 \
+    --internet-security true --associated-route-table $hub2_vnet_rt_id --propagated-route-tables $hub1_vnet_rt_id --labels nohub2
+
+
+# Spoke22 in location2
+spoke_id=22
+vnet_prefix=10.2.2.0/24
+subnet_prefix=10.2.2.0/26
+az vm create -n spoke${spoke_id}-vm -g $rg -l $location2 --image ubuntuLTS --admin-username $username --generate-ssh-keys --size $vm_size \
+    --public-ip-address spoke${spoke_id}-pip --vnet-name spoke${spoke_id}-$location2 \
+    --vnet-address-prefix $vnet_prefix --subnet vm --subnet-address-prefix $subnet_prefix --custom-data $cloudinit_file
+az vm extension set --vm-name spoke${spoke_id}-vm -g $rg -n NetworkWatcherAgentLinux --publisher Microsoft.Azure.NetworkWatcher --version 1.4
+az network vhub connection create -n spoke${spoke_id} -g $rg --vhub-name hub2 --remote-vnet spoke${spoke_id}-$location2 \
+    --internet-security true --associated-route-table $hub2_vnet_rt_id --propagated-route-tables $hub1_vnet_rt_id --labels nohub2
+
+# Backdoor for access from the testing device over the Internet
+myip=$(curl -s4 ifconfig.co)
+az network route-table create -n spokes-$location1 -g $rg -l $location1
+az network route-table route create -n mypc -g $rg --route-table-name spokes-$location1 --address-prefix "${myip}/32" --next-hop-type Internet
+az network vnet subnet update -n vm --vnet-name spoke11-$location1 -g $rg --route-table spokes-$location1
+az network vnet subnet update -n vm --vnet-name spoke12-$location1 -g $rg --route-table spokes-$location1
+az network route-table create -n spokes-$location2 -g $rg -l $location2
+az network route-table route create -n mypc -g $rg --route-table-name spokes-$location2 --address-prefix "${myip}/32" --next-hop-type Internet
+az network vnet subnet update -n vm --vnet-name spoke21-$location2 -g $rg --route-table spokes-$location2
+az network vnet subnet update -n vm --vnet-name spoke22-$location2 -g $rg --route-table spokes-$location2
+
+
+######################
+# Connection Monitor #
+######################
+
+# Get VM IDs
+spoke11_vm_id=$(az vm show -g $rg --query id -o tsv -n spoke11-vm)
+spoke12_vm_id=$(az vm show -g $rg --query id -o tsv -n spoke12-vm)
+spoke21_vm_id=$(az vm show -g $rg --query id -o tsv -n spoke21-vm)
+spoke22_vm_id=$(az vm show -g $rg --query id -o tsv -n spoke22-vm)
+branch1_vm_id=$(az vm show -g $rg --query id -o tsv -n branch1-vm)
+branch2_vm_id=$(az vm show -g $rg --query id -o tsv -n branch2-vm)
+branch1_vm2_id=$(az vm show -g $rg --query id -o tsv -n branch1-vm2)
+branch2_vm2_id=$(az vm show -g $rg --query id -o tsv -n branch2-vm2)
+
+# A separate connection monitor will be created per source, since
+#   creating two test groups per CLI doesnt seem to work
+
+# From spoke11
+monitor_name=spoke11-$location1
+test_name=spoke11
+az network watcher connection-monitor create -n $monitor_name -g $rg -l $location1 \
+    --test-group-name $test_name --endpoint-source-type AzureVM --endpoint-dest-type AzureVM \
+    --endpoint-source-resource-id $spoke11_vm_id --endpoint-source-name spoke11 \
+    --endpoint-dest-resource-id $branch2_vm_id --endpoint-dest-name branch2 \
+    --test-config-name HttpConfig --protocol Http \
+    --http-method GET --https-prefer false --http-path '/'
+az network watcher connection-monitor test-configuration add --connection-monitor $monitor_name -l $location1 \
+    -n Icmp --protocol Icmp --icmp-disable-trace-route false --test-groups $test_name
+az network watcher connection-monitor endpoint add --connection-monitor $monitor_name -l $location1 \
+    --resource-id $spoke12_vm_id --name spoke12 --type AzureVM --dest-test-groups $test_name
+az network watcher connection-monitor endpoint add --connection-monitor $monitor_name -l $location1 \
+    --resource-id $spoke21_vm_id --name spoke21 --type AzureVM --dest-test-groups $test_name
+az network watcher connection-monitor endpoint add --connection-monitor $monitor_name -l $location1 \
+    --resource-id $spoke22_vm_id --name spoke22 --type AzureVM --dest-test-groups $test_name
+az network watcher connection-monitor endpoint add --connection-monitor $monitor_name -l $location1 \
+    --resource-id $branch1_vm_id --name branch1 --type AzureVM --dest-test-groups $test_name
+az network watcher connection-monitor endpoint add --connection-monitor $monitor_name -l $location1 \
+    --resource-id $branch1_vm2_id --name branch1_public --type AzureVM --dest-test-groups $test_name
+az network watcher connection-monitor endpoint add --connection-monitor $monitor_name -l $location1 \
+    --address "ubuntu.com" --name ubuntucom --type ExternalAddress --dest-test-groups $test_name
+
+# From spoke21
+monitor_name=spoke21-$location2
+test_name=spoke21
+az network watcher connection-monitor create -n $monitor_name -g $rg -l $location2 \
+    --test-group-name $test_name --endpoint-source-type AzureVM --endpoint-dest-type AzureVM \
+    --endpoint-source-resource-id $spoke21_vm_id --endpoint-source-name spoke21 \
+    --endpoint-dest-resource-id $branch2_vm_id --endpoint-dest-name branch2 \
+    --test-config-name HttpConfig --protocol Http \
+    --http-method GET --https-prefer false --http-path '/'
+az network watcher connection-monitor test-configuration add --connection-monitor $monitor_name -l $location2 \
+    -n Icmp --protocol Icmp --icmp-disable-trace-route false --test-groups $test_name
+az network watcher connection-monitor endpoint add --connection-monitor $monitor_name -l $location2 \
+    --resource-id $spoke11_vm_id --name spoke11 --type AzureVM --dest-test-groups $test_name
+az network watcher connection-monitor endpoint add --connection-monitor $monitor_name -l $location2 \
+    --resource-id $spoke12_vm_id --name spoke12 --type AzureVM --dest-test-groups $test_name
+az network watcher connection-monitor endpoint add --connection-monitor $monitor_name -l $location2 \
+    --resource-id $spoke22_vm_id --name spoke22 --type AzureVM --dest-test-groups $test_name
+az network watcher connection-monitor endpoint add --connection-monitor $monitor_name -l $location2 \
+    --resource-id $branch1_vm_id --name branch1 --type AzureVM --dest-test-groups $test_name
+az network watcher connection-monitor endpoint add --connection-monitor $monitor_name -l $location2 \
+    --resource-id $branch2_vm2_id --name branch2_public --type AzureVM --dest-test-groups $test_name
+az network watcher connection-monitor endpoint add --connection-monitor $monitor_name -l $location2 \
+    --address "ubuntu.com" --name ubuntucom --type ExternalAddress --dest-test-groups $test_name
+
+###########################
+# Logs from Azure Monitor #
+###########################
+
+# Firewall Network Rules
+fw_net_logs_query='AzureDiagnostics
+| where Category == "AzureFirewallNetworkRule"
+| where TimeGenerated >= ago(5m) 
+| parse msg_s with Protocol " request from " SourceIP ":" SourcePortInt:int " to " TargetIP ":" TargetPortInt:int *
+| parse msg_s with * ". Action: " Action1a
+| parse msg_s with * " was " Action1b " to " NatDestination
+| parse msg_s with Protocol2 " request from " SourceIP2 " to " TargetIP2 ". Action: " Action2
+| extend SourcePort = tostring(SourcePortInt),TargetPort = tostring(TargetPortInt)
+| extend Action = case(Action1a == "", case(Action1b == "",Action2,Action1b), Action1a),Protocol = case(Protocol == "", Protocol2, Protocol),SourceIP = case(SourceIP == "", SourceIP2, SourceIP),TargetIP = case(TargetIP == "", TargetIP2, TargetIP),SourcePort = case(SourcePort == "", "N/A", SourcePort),TargetPort = case(TargetPort == "", "N/A", TargetPort),NatDestination = case(NatDestination == "", "N/A", NatDestination)
+//| where Action == "Deny" 
+//| project TimeGenerated, msg_s, Protocol, SourceIP,SourcePort,TargetIP,TargetPort,Action, NatDestination  // with msg_s
+| project TimeGenerated, Protocol, SourceIP,SourcePort,TargetIP,TargetPort,Action, NatDestination, Resource  // without msg_s
+//| take 20 '
+az monitor log-analytics query -w $logws_customerid --analytics-query $fw_net_logs_query -o tsv
+# Firewall App Rules
+fw_app_logs_query='AzureDiagnostics 
+| where ResourceType == "AZUREFIREWALLS" 
+| where Category == "AzureFirewallApplicationRule" 
+| where TimeGenerated >= ago(5m) 
+| project Protocol=split(msg_s, " ")[0], From=split(msg_s, " ")[iif(split(msg_s, " ")[0]=="HTTPS",3,4)], To=split(msg_s, " ")[iif(split(msg_s, " ")[0]=="HTTPS",5,6)], Action=trim_end(".", tostring(split(msg_s, " ")[iif(split(msg_s, " ")[0]=="HTTPS",7,8)])), Rule_Collection=iif(split(msg_s, " ")[iif(split(msg_s, " ")[0]=="HTTPS",10,11)]=="traffic.", "AzureInternalTraffic", iif(split(msg_s, " ")[iif(split(msg_s, " ")[0]=="HTTPS",10,11)]=="matched.","NoRuleMatched",trim_end(".",tostring(split(msg_s, " ")[iif(split(msg_s, " ")[0]=="HTTPS",10,11)])))), Rule=iif(split(msg_s, " ")[11]=="Proceeding" or split(msg_s, " ")[12]=="Proceeding","DefaultAction",split(msg_s, " ")[12]), Resource 
+| where Rule_Collection != "AzureInternalTraffic" 
+//| where Action == "Deny" 
+//| take 20'
+az monitor log-analytics query -w $logws_customerid --analytics-query $fw_app_logs_query -o tsv

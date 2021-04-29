@@ -1,0 +1,147 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "location": {
+            "value": "westcentralus"
+        },
+        "virtualMachineScaleSetName": {
+            "value": "spnva"
+        },
+        "virtualMachineScaleSetRG": {
+            "value": "az-vwannva-vmss"
+        },
+        "singlePlacementGroup": {
+            "value": "true"
+        },
+        "instanceSize": {
+            "value": "Standard_A2_v2"
+        },
+        "instanceCount": {
+            "value": "2"
+        },
+        "upgradeMode": {
+            "value": "Manual"
+        },
+        "priority": {
+            "value": "Regular"
+        },
+        "enableAcceleratedNetworking": {
+            "value": "false"
+        },
+        "osDiskType": {
+            "value": "StandardSSD_LRS"
+        },
+        "addressPrefixes": {
+            "value": [
+                "10.0.0.0/24"
+            ]
+        },
+        "subnets": {
+            "value": [
+                {
+                    "name": "default",
+                    "properties": {
+                        "addressPrefix": "10.0.0.0/24"
+                    }
+                }
+            ]
+        },
+        "virtualNetworkId": {
+            "value": "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva-vmss/providers/Microsoft.Network/virtualNetworks/az-vwannva-vnet"
+        },
+        "virtualNetworkName": {
+            "value": "az-vwannva-vnet"
+        },
+        "networkSecurityGroups": {
+            "value": [
+                {
+                    "name": "basicNsgaz-vwannva-vnet-nic01",
+                    "id": "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva-vmss/providers/Microsoft.Network/networkSecurityGroups/basicNsgaz-vwannva-vnet-nic01",
+                    "rules": [
+                        {
+                            "name": "SSH",
+                            "properties": {
+                                "priority": 300,
+                                "protocol": "TCP",
+                                "access": "Allow",
+                                "direction": "Inbound",
+                                "sourceAddressPrefix": "*",
+                                "sourcePortRange": "*",
+                                "destinationAddressPrefix": "*",
+                                "destinationPortRange": "22"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "basicNsgnic2",
+                    "id": "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva-vmss/providers/Microsoft.Network/networkSecurityGroups/basicNsgnic2",
+                    "rules": []
+                }
+            ]
+        },
+        "publicIpAddresses": {
+            "value": [
+                {
+                    "name": "publicIp-az-vwannva-vnet-nic01"
+                }
+            ]
+        },
+        "networkInterfaceConfigurations": {
+            "value": [
+                {
+                    "name": "az-vwannva-vnet-nic01",
+                    "primary": true,
+                    "subnetId": "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva-vmss/providers/Microsoft.Network/virtualNetworks/az-vwannva-vnet/subnets/default",
+                    "applicationGatewayBackendAddressPools": [],
+                    "loadBalancerBackendAddressPools": [],
+                    "applicationSecurityGroups": [],
+                    "loadBalancerInboundNatPools": [],
+                    "enableAcceleratedNetworking": false,
+                    "nsgName": "basicNsgaz-vwannva-vnet-nic01",
+                    "nsgId": "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva-vmss/providers/Microsoft.Network/networkSecurityGroups/basicNsgaz-vwannva-vnet-nic01",
+                    "pipName": "publicIp-az-vwannva-vnet-nic01"
+                },
+                {
+                    "name": "nic2",
+                    "primary": false,
+                    "subnetId": "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva-vmss/providers/Microsoft.Network/virtualNetworks/az-vwannva-vnet/subnets/default",
+                    "applicationGatewayBackendAddressPools": [],
+                    "loadBalancerBackendAddressPools": [],
+                    "applicationSecurityGroups": [],
+                    "loadBalancerInboundNatPools": [],
+                    "enableAcceleratedNetworking": false,
+                    "nsgName": "basicNsgnic2",
+                    "nsgId": "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva-vmss/providers/Microsoft.Network/networkSecurityGroups/basicNsgnic2",
+                    "pipName": ""
+                }
+            ]
+        },
+        "vmName": {
+            "value": "spnva"
+        },
+        "scaleInPolicy": {
+            "value": {
+                "rules": [
+                    "Default"
+                ]
+            }
+        },
+        "overprovision": {
+            "value": true
+        },
+        "upgradePolicy": {
+            "value": "Manual"
+        },
+        "adminUsername": {
+            "value": "azadmin"
+        },
+        "adminPublicKey": {
+            "value": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC+OLyFTWdhcfLkKIWRbwbMdXsmlqEZFH2sJfQgWlw+yrqJumnZ18K1K7RKISvXiaa2Ij/cmts1exwzf/OHwwiIGYxliL77wRvxYu52CXw2KmWTfp8YXcwhXZFXtiKHYAIQvEhVYOtShR5labsz1fsWMcBKRuxvmMvZuaRt4Rl3q20m1sfNgnL300CI2E5tkCEcvUKadVA5IU6hbEQBqYZzaKjP+ra2WqjkOZ8dSraOQB1COfRmXncLl4wImuNyORDFhbfD89yX+Xp1od7Earz6MrjPG1irddcD5Zd4qYMyfCeUqad3awxmWmO4H11lzYBz8w9CBLUh0Aio/3mmuFid"
+        },
+        "platformFaultDomainCount": {
+            "value": "5"
+        }
+    }
+}

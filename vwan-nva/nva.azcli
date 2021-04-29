@@ -7,26 +7,117 @@ rg=az-vwannva
 # Create Vnet
 az group create -n $rg -l $location
 
+
+# Create VWAN/ Hub
+vwan=vwan-nva-lab2
+az network vwan create -n $vwan -g $rg -l $location
+az network vhub create -n we-hub2 --address-prefix 192.168.1.0/24 -g $rg --vwan $vwan -l $location
+
+az network vhub show -n we-hub -g $rg
+
 az account list-locations -o table
 
-az network virtual-appliance create --name nva -g $rg \
+#silver-peak
+az network virtual-appliance create --name nvasp2 -g $rg \
      --scale-unit 2 \
      --vendor SilverPeakEdgeConnect \
      --version latest \
-     --vhub "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva/providers/Microsoft.Network/virtualHubs/vhub" \
+     --vhub "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva/providers/Microsoft.Network/virtualHubs/we-hub2" \
      --asn 65100 \
-     --init-config "echo hello:"
+     --init-config "echo hello" \     
+     --tags accountName="Silver Peak Eng - Dinesh Fernando" accountKey="ZUR8wU0B6611RSk3Gqp1ctk500jLrqnL"
+     
+--properties.SSHPublicKey "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC+OLyFTWdhcfLkKIWRbwbMdXsmlqEZFH2sJfQgWlw+yrqJumnZ18K1K7RKISvXiaa2Ij/cmts1exwzf/OHwwiIGYxliL77wRvxYu52CXw2KmWTfp8YXcwhXZFXtiKHYAIQvEhVYOtShR5labsz1fsWMcBKRuxvmMvZuaRt4Rl3q20m1sfNgnL300CI2E5tkCEcvUKadVA5IU6hbEQBqYZzaKjP+ra2WqjkOZ8dSraOQB1COfRmXncLl4wImuNyORDFhbfD89yX+Xp1od7Earz6MrjPG1irddcD5Zd4qYMyfCeUqad3awxmWmO4H11lzYBz8w9CBLUh0Aio/3mmuFid" \
     
-az network virtual-appliance create --name nva -g $rg \
+az network virtual-appliance delete --name nvasp2 -g $rg 
+az network virtual-appliance show --name nvasp2 -g $rg 
+
+#subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
+subscription="Azure CXP FTA Internal Subscription THOVUY SIG"
+#select subscription
+az account set --subscription "$subscription"
+location=westcentralus
+rg=az-vwangnva
+# Create Vnet
+az group create -n $rg -l $location
+
+# Create VWAN/ Hub
+vwan=vwan-gnva-lab
+hub=we-hub2
+nva=gnva
+az network vwan create -n $vwan -g $rg -l $location
+az network vhub create -n $hub --address-prefix 192.168.2.0/24 -g $rg --vwan $vwan -l $location
+#hubid=$(az network vhub show -n $hub -g $rg --query 'id')
+#generic NVA
+gnva_cloudinit="nva-cloudinit.txt"
+cat <<EOF > $gnva_cloudinit
+#cloud-config
+users:
+  - name: azadmin
+    plain_text_passwd:Microsoft123!
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']    
+  - name: azadmin2
+    passwd:$6$rounds=4096$Njsv0x8kQkZG3.o$u.6WuSj9etGz50zhcCKZXeMupBUqZ4zQAIR.r55xbmmz9aLjLjw2KrQIj6Pr74pkW7wCz5LL5UOkpYsUjz3mk/
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']    
+chpasswd:
+  list: |
+    root:Microsoft123!
+    azureuser:Microsoft123!
+EOF
+
+cat $gnva_cloudinit
+output=$(head $gnva_cloudinit)
+echo "$output"
+
+read -r -d '' cloudinit <<EOF
+#cloud-config
+users:
+  - name: azadmin
+    plain_text_passwd:Microsoft123!
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']    
+  - name: azadmin2
+    passwd:$6$rounds=4096$Njsv0x8kQkZG3.o$u.6WuSj9etGz50zhcCKZXeMupBUqZ4zQAIR.r55xbmmz9aLjLjw2KrQIj6Pr74pkW7wCz5LL5UOkpYsUjz3mk/
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']    
+chpasswd:
+  list: |
+    root:Microsoft123!
+    azureuser:Microsoft123!
+EOF
+
+echo $cloudinit
+
+
+#!/bin/sh
+cat $gnva_cloudinit | python -c 'import json, sys; print( json.dumps( sys.stdin.read() ) )'
+
+az network virtual-appliance create --name $nva -g $rg \
      --scale-unit 2 \
-     --vendor SilverPeakEdgeConnect \
+     --vendor Contoso_generic_test_nva \
      --version latest \
-     --vhub vhub \
-     --asn 65100
+     --vhub $hub \
+     --asn 65100 \
+     --init-config $output \
+     --tags accountName="Silver Peak Eng - Dinesh Fernando" accountKey="ZUR8wU0B6611RSk3Gqp1ctk500jLrqnL"
+
+az network virtual-appliance show --name $nva -g $rg 
+az network virtual-appliance delete --name $nva -g $rg 
+az network vhub delete -n $hub -g $rg
+az network vwan delete -n $vwan -g $rg
+
+
+
+#VMSS
+rg=az-vwannva-vmss
+az group create -n $rg -l $location
+
+#sshkey="ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC+OLyFTWdhcfLkKIWRbwbMdXsmlqEZFH2sJfQgWlw+yrqJumnZ18K1K7RKISvXiaa2Ij/cmts1exwzf/OHwwiIGYxliL77wRvxYu52CXw2KmWTfp8YXcwhXZFXtiKHYAIQvEhVYOtShR5labsz1fsWMcBKRuxvmMvZuaRt4Rl3q20m1sfNgnL300CI2E5tkCEcvUKadVA5IU6hbEQBqYZzaKjP+ra2WqjkOZ8dSraOQB1COfRmXncLl4wImuNyORDFhbfD89yX+Xp1od7Earz6MrjPG1irddcD5Zd4qYMyfCeUqad3awxmWmO4H11lzYBz8w9CBLUh0Aio/3mmuFid"
+#new image
+az deployment group create -g $rg --template-file ./vmss-arm-template/template.json --parameters ./vmss-arm-template/parameters.json #--parameters adminPublicKey=$sshkey
+#current mp image
+az deployment group create -g $rg --template-file ./vmss-arm-template/template_current.json --parameters ./vmss-arm-template/parameters.json #--parameters adminPublicKey=$sshkey
                                     
 az network virtual-appliance sku list -o table
-
-az network virtual-appliance show --name nva -g $rg
+az network virtual-appliance show --name nva2 -g $rg
 
 #try as a VMSS
 #does it fail when the tags are not specified?
@@ -71,7 +162,7 @@ az vm image list --output table --all
 
 resources.azure.com/raw
 
-PUT https://management.azure.com/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva/providers/Microsoft.Network/networkVirtualAppliances/nva?api-version=2020-07-01
+PUT https://management.azure.com/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva/providers/Microsoft.Network/networkVirtualAppliances/nvasp3?api-version=2020-07-01
 
 { 
     "properties": { 
@@ -81,16 +172,19 @@ PUT https://management.azure.com/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721
             "marketPlaceVersion": "latest" 
         }, 
         "virtualHub": { 
-            "id": "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva/providers/Microsoft.Network/virtualHubs/vhub" 
+            "id": "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva/providers/Microsoft.Network/virtualHubs/we-hub2" 
         }, 
-        "virtualApplianceAsn": 64512, 
+        "virtualApplianceAsn": 64512,
+        "SSHPublicKey": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC+OLyFTWdhcfLkKIWRbwbMdXsmlqEZFH2sJfQgWlw+yrqJumnZ18K1K7RKISvXiaa2Ij/cmts1exwzf/OHwwiIGYxliL77wRvxYu52CXw2KmWTfp8YXcwhXZFXtiKHYAIQvEhVYOtShR5labsz1fsWMcBKRuxvmMvZuaRt4Rl3q20m1sfNgnL300CI2E5tkCEcvUKadVA5IU6hbEQBqYZzaKjP+ra2WqjkOZ8dSraOQB1COfRmXncLl4wImuNyORDFhbfD89yX+Xp1od7Earz6MrjPG1irddcD5Zd4qYMyfCeUqad3awxmWmO4H11lzYBz8w9CBLUh0Aio/3mmuFid",
         "cloudInitConfiguration": "echo hello" 
     }, 
     "id": "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva/providers/Microsoft.Network/networkVirtualAppliances/nva", 
-    "name": "nva", 
+    "name": "nvasp3", 
     "type": "Microsoft.Network/NetworkVirtualAppliances", 
     "location": "westcentralus" 
 } 
+
+# something else
 
                     "imageReference": {
                         "publisher": "silver-peak-systems",
@@ -100,21 +194,25 @@ PUT https://management.azure.com/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721
                     }
 
 
+#gnva onboarding
 
-
-    
-
-Deploy the NVA with Azure CLI 
-
-As an alternative to calling the REST API you can leverage the Azure CLI. Taking into account the above example values: 
-
-az network virtual-appliance create --name mytestnva -g vwanrg \
-     --scale-unit 2 \
-     --vendor ContosoSDWAN \
-     --version latest \
-     --vhub "/subscriptions/XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX/resourceGroups/vwanrg/providers/Microsoft.Network/virtualHubs/contosohub" \
-     --asn 64512 \
-     --init-config "echo hello"
-
-
- az network virtual-appliance show --name mytestnva -g vwanrg
+{
+  "Publisher": "Contoso",
+  "Offer": "Contoso_Test_NVA",
+  "Vendor": "Contoso_generic_test_nva",
+  "Sku": "Contoso_generic_test_nva",
+"SkuType": "test",
+"ImageGalleryUri": "/subscriptions/bb0a98e0-34e3-40d1-856f-899c5203df01/resourceGroups/g_nva-image/providers/Microsoft.Compute/galleries/g_nva_gallery/images/g_nva/versions/0.1.0",
+  "Properties": {
+  "AvailableVersions": [ "0.1.0", "latest" ],
+"AvailableScaleUnits": [
+{
+"ScaleUnit": "2",
+"VmSku": "Standard_D2_v2",
+"InstanceCount": "2"
+}
+],
+  "AllowedInboundPorts": [ "22, 500,4500" ],
+  "AllowedOutboundPorts": [ "*" ]
+}
+}

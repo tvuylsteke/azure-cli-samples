@@ -75,3 +75,10 @@ az network routeserver peering list-learned-routes -n nvahub2 --vrouter-name rsh
 
 az network routeserver peering list-learned-routes -n hub2nva --vrouter-name rshub2 -g $rg --query 'RouteServiceRole_IN_0' -o table
 az network routeserver peering list-learned-routes -n nvahub1 --vrouter-name rshub2 -g $rg --query 'RouteServiceRole_IN_0' -o table
+
+az network routeserver list -g $rg -o table
+az network routeserver show -n rshub1 -g $rg
+az network routeserver peering list --vrouter-name rshub1 -g $rg -o table
+az network routeserver peering delete --vrouter-name rshub1 -g $rg -n nvahub2
+
+az network routeserver delete -n myRouteServer -g $rg

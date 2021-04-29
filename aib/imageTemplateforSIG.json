@@ -10,7 +10,7 @@
         "identity": {
             "type": "UserAssigned",
                     "userAssignedIdentities": {
-                    "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourcegroups/az-gnva-image/providers/Microsoft.ManagedIdentity/userAssignedIdentities/aibBuiUserId1614682870": {}
+                    "/subscriptions/bb0a98e0-34e3-40d1-856f-899c5203df01/resourcegroups/g_nva-image/providers/Microsoft.ManagedIdentity/userAssignedIdentities/aibBuiUserId1614886257": {}
                         
                 }
                 },
@@ -60,7 +60,7 @@
         [
             {   
                 "type": "SharedImage",
-                "galleryImageId": "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-gnva-image/providers/Microsoft.Compute/galleries/g_nva_gallery/images/g_nva",
+                "galleryImageId": "/subscriptions/bb0a98e0-34e3-40d1-856f-899c5203df01/resourceGroups/g_nva-image/providers/Microsoft.Compute/galleries/g_nva_gallery/images/g_nva/version/0.1.0",
                 "runOutputName": "g_nva",
                 "artifactTags": {
                     "source": "azureVmImageBuilder",

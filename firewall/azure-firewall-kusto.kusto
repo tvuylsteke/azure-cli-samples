@@ -1,0 +1,150 @@
+// new rewritten rules.
+
+//*****************************************************************************************************
+// DNS rule log data
+//*****************************************************************************************************
+// DNS proxy log data 
+// Parses the DNS proxy log data. 
+AzureDiagnostics
+| where Category == "AzureFirewallDnsProxy"
+| parse msg_s with "DNS Request: " SourceIP ":" SourcePortInt:int " - " QueryID:int " " RequestType " " RequestClass " " hostname ". " protocol " " details
+| extend
+    ResponseDuration = extract("[0-9]*.?[0-9]+s$", 0, msg_s),
+    SourcePort = tostring(SourcePortInt),
+    QueryID =  tostring(QueryID)
+| project TimeGenerated,SourceIP,hostname,RequestType,ResponseDuration,details,msg_s
+| order by TimeGenerated
+
+//*****************************************************************************************************
+// Application rule log data
+//*****************************************************************************************************
+// Application rule log data 
+// Parses the application rule log data. 
+AzureDiagnostics
+| where Category == "AzureFirewallApplicationRule"
+// normalize data so it's eassier to parse later
+| extend msg_s = replace(@'Reason: SNI TLS extension was missing.', @'Rule Collection: default behavior. Rule: SNI TLS extension missing', msg_s)
+| extend msg_s = replace(@'No rule matched. Proceeding with default action', @'Rule Collection: default behavior. Rule: no rule matched', msg_s)
+// extract web category, for now it's always add the end
+| parse msg_s with * " Web Category: " WebCategory
+// remove web category from msg_s before further parsing.
+| extend msg_s = replace(@'(. Web Category:).*','', msg_s)
+| parse msg_s with Protocol " request from " SourceIP ":" SourcePortInt:int *
+| parse msg_s with * "to " FQDN ":" TargetPortInt:int *
+| parse msg_s with * " Action: " Action ". Rule Collection: " RuleCollection ". Rule: " Rule
+| parse msg_s with * "Url: " URL ". Action:" *
+| extend 
+    SourcePort = tostring(SourcePortInt),
+    TargetPort = tostring(TargetPortInt)
+| project TimeGenerated, Protocol, SourceIP, SourcePort, FQDN, TargetPort, URL, Action ,RuleCollection, Rule, WebCategory
+| order by TimeGenerated
+
+
+//*****************************************************************************************************
+// Threat Intel
+//*****************************************************************************************************
+
+//outdated?
+//https://docs.microsoft.com/en-us/azure/firewall/firewall-diagnostics#enable-diagnostic-logging-through-the-azure-portal
+//No more AzureFirewallThreatIntelLog 
+//https://docs.microsoft.com/en-us/azure/firewall/logs-and-metrics
+
+
+// Threat Intelligence rule log data 
+// Parses the Threat Intelligence rule log data. 
+AzureDiagnostics
+| where Category == "AzureFirewallThreatIntelLog"
+// First extract message with ThreatIntel
+// this makes it eassier to parse records that don't have ThreatIntel (e.g. ICMP)
+| parse msg_s with * ". ThreatIntel: " ThreatIntel
+// remove ThreatIntel info before further parsing.
+| extend msg_s = replace(@'(. ThreatIntel:).*','', msg_s)
+| parse msg_s with Protocol " request from " SourceIP " to " TargetIP ". Action: " Action
+| extend 
+    SourceIP = iif(SourceIP contains ":",strcat_array(split(SourceIP,":",0),""),SourceIP),
+    SourcePort = iif(SourceIP contains ":",strcat_array(split(SourceIP,":",1),""),""),
+    TargetIP = iif(TargetIP contains ":",strcat_array(split(TargetIP,":",0),""),TargetIP),
+    TargetPort = iif(SourceIP contains ":",strcat_array(split(SourceIP,":",1),""),"")
+| project TimeGenerated,Protocol,SourceIP,SourcePort,TargetIP,TargetPort,Action,Message
+| order by TimeGenerated
+
+//*****************************************************************************************************
+// Network rule log data
+//*****************************************************************************************************
+// Network rule log data 
+// Parses the network rule log data. 
+// Includes network rules, threat intelligence and ips/ids
+AzureDiagnostics
+| where Category == "AzureFirewallNetworkRule"
+| extend msg_original = msg_s
+// extract IDS fields, for now it's always add the end, then remove it from further parsing
+| parse msg_s with * ". Signature: " IDSSignatureIDInt ". IDS: " IDSSignatureDescription ". Priority: " IDSPriorityInt ". Classification: " IDSClassification
+| extend msg_s = replace(@'(. Signature:).*','', msg_s)
+// extra NAT info, then remove it from further parsing
+| parse msg_s with * " was DNAT'ed to " NatDestination
+| extend msg_s = replace(@"( was DNAT'ed to ).*",". Action: DNAT'ed", msg_s)
+// extract Threat Intellingence info, then remove it from further parsing
+| parse msg_s with * ". ThreatIntel: " ThreatIntel
+| extend msg_s = replace(@'(. ThreatIntel:).*','', msg_s)
+// extract URL, then remove it from further parsing
+| extend URL = extract(@"(Url: )(.*)(\. Action)",2,msg_s)
+| extend msg_s=replace(@"(Url: .*)(Action)",@"\2",msg_s)
+// parse remaining "simple" fields
+| parse msg_s with Protocol " request from " SourceIP " to " Target ". Action: " Action
+| extend 
+    SourceIP = iif(SourceIP contains ":",strcat_array(split(SourceIP,":",0),""),SourceIP),
+    SourcePort = iif(SourceIP contains ":",strcat_array(split(SourceIP,":",1),""),""),
+    Target = iif(Target contains ":",strcat_array(split(Target,":",0),""),Target),
+    TargetPort = iif(SourceIP contains ":",strcat_array(split(SourceIP,":",1),""),""),
+    IDSSignatureID = tostring(IDSSignatureIDInt),
+    IDSPriority = tostring(IDSPriorityInt)
+| project msg_original,TimeGenerated,Protocol,SourceIP,SourcePort,Target,TargetPort,URL,Action, NatDestination, OperationName,ThreatIntel,IDSSignatureID,IDSSignatureDescription,IDSPriority,IDSClassification
+| order by TimeGenerated
+
+//*****************************************************************************************************
+// ALL (network, threat intel and app) rule log data
+//*****************************************************************************************************
+
+// Parses the azure firewall rule log data. 
+// Includes network rules, applicationg rules, threat intelligence, ips/ids, ...
+AzureDiagnostics
+| where Category == "AzureFirewallNetworkRule" or Category == "AzureFirewallApplicationRule"
+//optionally apply filters to only look at a certain type of log data
+//| where OperationName == "AzureFirewallNetworkRuleLog"
+//| where OperationName == "AzureFirewallNatRuleLog"
+//| where OperationName == "AzureFirewallApplicationRuleLog"
+//| where OperationName == "AzureFirewallIDSLog"
+//| where OperationName == "AzureFirewallThreatIntelLog"
+| extend msg_original = msg_s
+// normalize data so it's eassier to parse later
+| extend msg_s = replace(@'. Action: Deny. Reason: SNI TLS extension was missing.', @' to no_data:no_data. Action: Deny. Rule Collection: default behavior. Rule: SNI TLS extension missing', msg_s)
+| extend msg_s = replace(@'No rule matched. Proceeding with default action', @'Rule Collection: default behavior. Rule: no rule matched', msg_s)
+// extract web category, then remove it from further parsing
+| parse msg_s with * " Web Category: " WebCategory
+| extend msg_s = replace(@'(. Web Category:).*','', msg_s)
+// extract RuleCollection and Rule information, then remove it from further parsing
+| parse msg_s with * ". Rule Collection: " RuleCollection ". Rule: " Rule
+| extend msg_s = replace(@'(. Rule Collection:).*','', msg_s)
+// extract IDS fields, for now it's always add the end, then remove it from further parsing
+| parse msg_s with * ". Signature: " IDSSignatureIDInt ". IDS: " IDSSignatureDescription ". Priority: " IDSPriorityInt ". Classification: " IDSClassification
+| extend msg_s = replace(@'(. Signature:).*','', msg_s)
+// extra NAT info, then remove it from further parsing
+| parse msg_s with * " was DNAT'ed to " NatDestination
+| extend msg_s = replace(@"( was DNAT'ed to ).*",". Action: DNAT", msg_s)
+// extract Threat Intellingence info, then remove it from further parsing
+| parse msg_s with * ". ThreatIntel: " ThreatIntel
+| extend msg_s = replace(@'(. ThreatIntel:).*','', msg_s)
+// extract URL, then remove it from further parsing
+| extend URL = extract(@"(Url: )(.*)(\. Action)",2,msg_s)
+| extend msg_s=replace(@"(Url: .*)(Action)",@"\2",msg_s)
+// parse remaining "simple" fields
+| parse msg_s with Protocol " request from " SourceIP " to " Target ". Action: " Action
+| extend 
+    SourceIP = iif(SourceIP contains ":",strcat_array(split(SourceIP,":",0),""),SourceIP),
+    SourcePort = iif(SourceIP contains ":",strcat_array(split(SourceIP,":",1),""),""),
+    Target = iif(Target contains ":",strcat_array(split(Target,":",0),""),Target),
+    TargetPort = iif(SourceIP contains ":",strcat_array(split(Target,":",1),""),""),
+    IDSSignatureID = tostring(IDSSignatureIDInt),
+    IDSPriority = tostring(IDSPriorityInt)
+| project msg_original,TimeGenerated,Protocol,SourceIP,SourcePort,Target,TargetPort,URL,Action, NatDestination, OperationName,ThreatIntel,IDSSignatureID,IDSSignatureDescription,IDSPriority,IDSClassification,RuleCollection,Rule,WebCategory
+| order by TimeGenerated

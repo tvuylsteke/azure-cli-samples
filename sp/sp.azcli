@@ -53,5 +53,5 @@ ssh-keyscan -H $pip >> ~/.ssh/known_hosts
 az network route-table create -g $rg -n RouteTable01 
 az network route-table route create -g $rg --route-table-name RouteTable01 -n appServiceRoute --address-prefix AppServiceManagement --next-hop-type Internet 
 az network route-table route create -g $rg --route-table-name RouteTable01 -n WVD --address-prefix WindowsVirtualDesktop --next-hop-type Internet 
-az network route-table route create -g $rg --route-table-name RouteTable01 -n AzureSouthCentral --address-prefix AzureCloud.southcentralus --next-hop-type Internet AzureCloud.southcentralus 
-________________________________________
+az network route-table route create -g $rg --route-table-name RouteTable01 -n AzureSouthCentral --address-prefix AzureCloud.southcentralus --next-hop-type Internet
+

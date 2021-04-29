@@ -1,0 +1,56 @@
+subscription="MSDN THOVUY"
+az account set --subscription "$subscription"
+
+admin_password=$(az keyvault secret show --id https://setspnvault.vault.azure.net/secrets/local-vm-password/efcdc715a1de4dca90806409730fb638 --query 'value' -o tsv)
+admin_user=azadmin
+
+rg=pi-hole
+location=westeurope
+
+az group create -n $rg -l $location
+
+vnet_name=pi-hole-net
+subnet_vm_name=servers
+vm_name=pihole
+vm_nsg_name=${vm_name}-nsg
+vm_pip_name=${vm_name}-pip
+vm_disk_name=${vm_name}-disk0
+vm_sku=Standard_B2ms
+publisher=Canonical
+offer=UbuntuServer
+sku=18.04-LTS
+image_urn=$(az vm image list -p $publisher -f $offer -s $sku -l $location --query '[0].urn' -o tsv)
+# Deploy VM
+az vm create -n $vm_name -g $rg -l $location --image $image_urn --size $vm_sku --admin-password $admin_password --admin-username $admin_user \
+  --os-disk-name $vm_disk_name --os-disk-size-gb 32 \
+  --vnet-name $vnet_name --subnet $subnet_vm_name \
+  --nsg $vm_nsg_name --nsg-rule NONE --public-ip-address $vm_pip_name --public-ip-address-allocation static
+#retrieve own pip
+my_ip=$(curl -s4 ifconfig.co)
+
+echo $my_ip
+
+# Add rule to NSG on port 8080
+az network nsg rule create -n SSH --nsg-name $vm_nsg_name -g $rg \
+  --protocol Tcp --access Allow --priority 105 --direction Inbound \
+  --destination-port-ranges 22 --source-address-prefixes "$my_ip/32"
+
+az network nsg rule create -n DNS --nsg-name $vm_nsg_name -g $rg \
+  --protocol udp --access Allow --priority 106 --direction Inbound \
+  --destination-port-ranges 53 --source-address-prefixes "$my_ip/32"
+
+az network nsg rule create -n WEB --nsg-name $vm_nsg_name -g $rg \
+  --protocol Tcp --access Allow --priority 106 --direction Inbound \
+  --destination-port-ranges 80 --source-address-prefixes "$my_ip/32"
+
+sudo apt-get update
+sudo apt-get upgrade
+curl -sSL https://install.pi-hole.net | bash
+
+http://.../80
+
+#set password
+sudo pihole -a -p
+
+52.148.217.247
+1.1.1.1

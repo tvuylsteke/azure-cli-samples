@@ -1,0 +1,153 @@
+subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
+#select subscription
+az account set --subscription "$subscription"
+
+# variables
+rg=az-networkwatchter
+location=westeurope
+admin_password=Microsoft123!
+admin_user=azadmin
+
+vnet_name=aznet
+vnet_prefix=10.1.0.0/16
+# GW (future use)
+gw_subnet_prefix=10.1.1.0/24
+# test VM
+vm_subnet_name=vm
+vm_subnet_prefix=10.1.2.0/24
+vm_name=azvm
+
+# Location 1: Azure
+# Create Vnet
+az group create -n $rg -l $location
+az network vnet create -g $rg -n $vnet_name --address-prefix $vnet_prefix --subnet-name $vm_subnet_name --subnet-prefix $vm_subnet_prefix
+az network vnet subnet create -n GatewaySubnet --address-prefix $gw_subnet_prefix --vnet-name $vnet_name -g $rg
+
+# Create Gateway
+az network public-ip create -n vpngwpip -g $rg --allocation-method Dynamic
+az network vnet-gateway create -n vpngw -l $location --public-ip-address vpngwpip -g $rg --vnet $vnet_name --gateway-type Vpn --sku VpnGw1 --vpn-type RouteBased --no-wait
+
+#Test vm
+az vm create -n $vm_name -g $rg -l $location --image ubuntuLTS --generate-ssh-keys \
+    --public-ip-address $vm_name-pip --vnet-name $vnet_name --size Standard_B1s --subnet $vm_subnet_name
+pip=$(az network public-ip show -n $vm_name-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+# Location 2: on-prem
+location=westcentralus
+
+vnet_name=opnet
+vnet_prefix=10.2.0.0/16
+# GW (future use)
+nva_asn=65002
+nva_subnet_name=nva
+nva_subnet_prefix=10.2.1.0/24
+nva_default_gw=10.2.1.1
+nva_name=nva
+nva_ip=10.2.1.10
+nva_pip=${nva_name}-pip
+
+psk=Microsoft123!
+
+# test VM
+vm_subnet_name=vm
+vm_subnet_prefix=10.2.2.0/24
+vm_name=opvm
+vm_win_name=opwinvm
+
+# Create Vnet
+az network vnet create -g $rg -n $vnet_name --address-prefix $vnet_prefix --subnet-name $vm_subnet_name --subnet-prefix $vm_subnet_prefix -l $location
+az network vnet subnet create -n $nva_subnet_name --address-prefix $nva_subnet_prefix --vnet-name $vnet_name -g $rg
+
+#Test vm
+az vm create -n $vm_name -g $rg -l $location --image ubuntuLTS --generate-ssh-keys --public-ip-address $vm_name-pip --vnet-name $vnet_name --size Standard_B1s --subnet $vm_subnet_name
+pip=$(az network public-ip show -n $vm_name-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+#windows VM
+az vm create -g $rg -n $vm_win_name --image win2016datacenter --admin-username $admin_user --admin-password $admin_password --public-ip-address $vm_win_name-pip -l $location  --size Standard_B1s --subnet $vm_subnet_name --vnet-name $vnet_name 
+
+# CSR
+az network public-ip create --name $nva_pip --resource-group $rg --idle-timeout 30 --allocation-method Static -l $location
+az network nic create --name ${nva_name}-nic -g $rg --subnet $nva_subnet_name --vnet $vnet_name --ip-forwarding true --private-ip-address $nva_ip --public-ip-address $nva_pip -l $location
+az vm create --resource-group $rg --loc $location --name $nva_name --size Standard_D2_v2 --nics ${nva_name}-nic --image cisco:cisco-csr-1000v:16_10-byol:16.10.120190108 --generate-ssh-keys --no-wait
+
+nva_pip_ip=$(az network public-ip show -n $nva_pip -g $rg --query ipAddress -o tsv) && echo $nva_pip_ip
+gw_pip_ip=$(az network public-ip show -n vpngwpip -g $rg --query ipAddress -o tsv) && echo $gw_pip_ip
+
+#do config
+echo $gw_pip_ip
+echo $psk
+#Replace in config file and apply
+echo $nva_pip_ip
+
+#local network gateway (update gw ip later)
+az network local-gateway create -g "$rg" -n onprem --gateway-ip-address "$nva_pip_ip" --local-address-prefixes $vnet_prefix
+
+#create connection
+location=westeurope
+az network vpn-connection create --name AzureToOnPrem -g $rg --vnet-gateway1 vpngw -l $location --shared-key $psk --local-gateway2 onprem
+
+#################
+# Log Analytics #
+#################
+
+# Create Log Analytics workspace
+logws_name=$(az monitor log-analytics workspace list -g $rg --query '[0].name' -o tsv)
+if [[ -z "$logws_name" ]]
+then
+    logws_name=log$RANDOM
+    echo "INFO: Creating log analytics workspace ${logws_name}..."
+    az monitor log-analytics workspace create -n $logws_name -g $rg
+else
+    echo "INFO: Log Analytics workspace $logws_name found in resource group $rg"
+fi
+logws_id=$(az resource list -g $rg -n $logws_name --query '[].id' -o tsv)
+logws_customerid=$(az monitor log-analytics workspace show -n $logws_name -g $rg --query customerId -o tsv)
+# Attach VPN GW
+vpngw_id=$(az network vnet-gateway show -g $rg -n vpngw --query 'id' -o tsv)
+az monitor diagnostic-settings create -n mydiag --resource $vpngw_id --workspace $logws_id \
+    --metrics '[{"category": "AllMetrics", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false }, "timeGrain": null}]' \
+    --logs '[{"category": "GatewayDiagnosticLog", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false}}, 
+            {"category": "TunnelDiagnosticLog", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false}},
+            {"category": "RouteDiagnosticLog", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false}},
+            {"category": "IKEDiagnosticLog", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false}}]' >/dev/null
+# IKE logs
+query='AzureDiagnostics 
+| where ResourceType == "VIRTUALNETWORKGATEWAYS" 
+| where Category == "IKEDiagnosticLog" 
+| where TimeGenerated >= ago(2m) 
+| project TimeGenerated, Message
+| take 20'
+az monitor log-analytics query -w $logws_customerid --analytics-query $query -o tsv
+
+#################
+# Network Watchter
+#################
+# On-prem requires full log analytics agent
+
+echo $logws_id
+echo $logws_customerid
+workspaceKey=$(az monitor log-analytics workspace get-shared-keys -n $logws_name -g $rg --query primarySharedKey -o tsv)
+echo $workspaceKey
+
+#doesnt work:
+ extension set \
+  --resource-group $rg \
+  --vm-name $vm_win_name \
+  --name MicrosoftMonitoringAgent \
+  --publisher Microsoft.EnterpriseCloud.Monitoring \
+  --protected-settings '{"workspaceKey":"$workspaceKey"}' \
+  --settings '{"workspaceId":"$logws_customerid"}' \
+  
+
+Set-AzVMExtension -ExtensionName "MicrosoftMonitoringAgent" `
+    -ResourceGroupName "myResourceGroup" `
+    -VMName "myVM" `
+    -Publisher "Microsoft.EnterpriseCloud.Monitoring" `
+    -ExtensionType "MicrosoftMonitoringAgent" `
+    -TypeHandlerVersion 1.0 `
+    -Settings $PublicSettings `
+    -ProtectedSettings $ProtectedSettings `
+    -Location WestUS 
+
+# Azure should be fine with network watchter extension
