@@ -1,8 +1,7 @@
 #cloud-config
 users:
-  - name: azadmin
-    plain_text_passwd: 'Microsoft123!'
-    sudo: ['ALL=(ALL) NOPASSWD:ALL']    
-  - name: azadmin2
-    passwd: '=4096.o.6WuSj9etGz50zhcCKZXeMupBUqZ4zQAIR.r55xbmmz9aLjLjw2KrQIj6Pr74pkW7wCz5LL5UOkpYsUjz3mk/'
-    sudo: ['ALL=(ALL) NOPASSWD:ALL']    
+  - default
+  - name: azadmin    
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    ssh-authorized-keys:
+      - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC+OLyFTWdhcfLkKIWRbwbMdXsmlqEZFH2sJfQgWlw+yrqJumnZ18K1K7RKISvXiaa2Ij/cmts1exwzf/OHwwiIGYxliL77wRvxYu52CXw2KmWTfp8YXcwhXZFXtiKHYAIQvEhVYOtShR5labsz1fsWMcBKRuxvmMvZuaRt4Rl3q20m1sfNgnL300CI2E5tkCEcvUKadVA5IU6hbEQBqYZzaKjP+ra2WqjkOZ8dSraOQB1COfRmXncLl4wImuNyORDFhbfD89yX+Xp1od7Earz6MrjPG1irddcD5Zd4qYMyfCeUqad3awxmWmO4H11lzYBz8w9CBLUh0Aio/3mmuFid

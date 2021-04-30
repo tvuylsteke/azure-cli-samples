@@ -54,12 +54,11 @@ gnva_cloudinit="nva-cloudinit.txt"
 cat <<EOF > $gnva_cloudinit
 #cloud-config
 users:
-  - name: azadmin
-    plain_text_passwd: 'Microsoft123!'
-    sudo: ['ALL=(ALL) NOPASSWD:ALL']    
-  - name: azadmin2
-    passwd: '$6$rounds=4096$Njsv0x8kQkZG3.o$u.6WuSj9etGz50zhcCKZXeMupBUqZ4zQAIR.r55xbmmz9aLjLjw2KrQIj6Pr74pkW7wCz5LL5UOkpYsUjz3mk/'
-    sudo: ['ALL=(ALL) NOPASSWD:ALL']    
+  - default
+  - name: azadmin    
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    ssh-authorized-keys:
+      - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC+OLyFTWdhcfLkKIWRbwbMdXsmlqEZFH2sJfQgWlw+yrqJumnZ18K1K7RKISvXiaa2Ij/cmts1exwzf/OHwwiIGYxliL77wRvxYu52CXw2KmWTfp8YXcwhXZFXtiKHYAIQvEhVYOtShR5labsz1fsWMcBKRuxvmMvZuaRt4Rl3q20m1sfNgnL300CI2E5tkCEcvUKadVA5IU6hbEQBqYZzaKjP+ra2WqjkOZ8dSraOQB1COfRmXncLl4wImuNyORDFhbfD89yX+Xp1od7Earz6MrjPG1irddcD5Zd4qYMyfCeUqad3awxmWmO4H11lzYBz8w9CBLUh0Aio/3mmuFid
 EOF
 
 base64_cloudinit=$(cat $gnva_cloudinit | base64 -w 0)
@@ -80,7 +79,7 @@ az network vhub delete -n $hub -g $rg
 az network vwan delete -n $vwan -g $rg
 
 # test with VMSS
-rg=test-vmss-gnva5
+rg=test-vmss-gnva7
 az group create --name $rg --location westcentralus
 az vmss create \
    --resource-group $rg \
@@ -91,7 +90,8 @@ az vmss create \
    --admin-password Microsoft123! \
    --image "/subscriptions/bb0a98e0-34e3-40d1-856f-899c5203df01/resourceGroups/g_nva-image/providers/Microsoft.Compute/galleries/g_nva_gallery/images/g_nva/versions/0.1.0" 
 
-
+az group list -o table
+az group delete --name test-vmss-gnva4 --yes
 
 az vmss show 
 
