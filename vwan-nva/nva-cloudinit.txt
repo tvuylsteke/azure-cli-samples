@@ -1,12 +1,8 @@
 #cloud-config
 users:
   - name: azadmin
-    plain_text_passwd:Microsoft123!
+    plain_text_passwd: 'Microsoft123!'
     sudo: ['ALL=(ALL) NOPASSWD:ALL']    
   - name: azadmin2
-    passwd:=4096.o.6WuSj9etGz50zhcCKZXeMupBUqZ4zQAIR.r55xbmmz9aLjLjw2KrQIj6Pr74pkW7wCz5LL5UOkpYsUjz3mk/
+    passwd: '=4096.o.6WuSj9etGz50zhcCKZXeMupBUqZ4zQAIR.r55xbmmz9aLjLjw2KrQIj6Pr74pkW7wCz5LL5UOkpYsUjz3mk/'
     sudo: ['ALL=(ALL) NOPASSWD:ALL']    
-chpasswd:
-  list: |
-    root:Microsoft123!
-    azureuser:Microsoft123!

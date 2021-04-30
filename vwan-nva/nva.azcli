@@ -48,51 +48,22 @@ nva=gnva
 az network vwan create -n $vwan -g $rg -l $location
 az network vhub create -n $hub --address-prefix 192.168.2.0/24 -g $rg --vwan $vwan -l $location
 #hubid=$(az network vhub show -n $hub -g $rg --query 'id')
+
 #generic NVA
 gnva_cloudinit="nva-cloudinit.txt"
 cat <<EOF > $gnva_cloudinit
 #cloud-config
 users:
   - name: azadmin
-    plain_text_passwd:Microsoft123!
+    plain_text_passwd: 'Microsoft123!'
     sudo: ['ALL=(ALL) NOPASSWD:ALL']    
   - name: azadmin2
-    passwd:$6$rounds=4096$Njsv0x8kQkZG3.o$u.6WuSj9etGz50zhcCKZXeMupBUqZ4zQAIR.r55xbmmz9aLjLjw2KrQIj6Pr74pkW7wCz5LL5UOkpYsUjz3mk/
+    passwd: '$6$rounds=4096$Njsv0x8kQkZG3.o$u.6WuSj9etGz50zhcCKZXeMupBUqZ4zQAIR.r55xbmmz9aLjLjw2KrQIj6Pr74pkW7wCz5LL5UOkpYsUjz3mk/'
     sudo: ['ALL=(ALL) NOPASSWD:ALL']    
-chpasswd:
-  list: |
-    root:Microsoft123!
-    azureuser:Microsoft123!
 EOF
 
-cat $gnva_cloudinit
-output=$(head $gnva_cloudinit)
-echo "$output"
-
-read -r -d '' cloudinit <<EOF
-#cloud-config
-users:
-  - name: azadmin
-    plain_text_passwd:Microsoft123!
-    sudo: ['ALL=(ALL) NOPASSWD:ALL']    
-  - name: azadmin2
-    passwd:$6$rounds=4096$Njsv0x8kQkZG3.o$u.6WuSj9etGz50zhcCKZXeMupBUqZ4zQAIR.r55xbmmz9aLjLjw2KrQIj6Pr74pkW7wCz5LL5UOkpYsUjz3mk/
-    sudo: ['ALL=(ALL) NOPASSWD:ALL']    
-chpasswd:
-  list: |
-    root:Microsoft123!
-    azureuser:Microsoft123!
-EOF
-
-echo $cloudinit
-
-cat $gnva_cloudinit 
-test=$(base64 $gnva_cloudinit)
-echo $test
-
-
-#!/bin/sh
-cat $gnva_cloudinit | python -c 'import json, sys; print( json.dumps( sys.stdin.read() ) )'
+base64_cloudinit=$(cat $gnva_cloudinit | base64 -w 0)
+#echo $base64_cloudinit | base64 -d
 
 az network virtual-appliance create --name $nva -g $rg \
      --scale-unit 2 \
@@ -100,7 +71,7 @@ az network virtual-appliance create --name $nva -g $rg \
      --version latest \
      --vhub $hub \
      --asn 65100 \
-     --init-config "$test" \
+     --init-config "$base64_cloudinit" \
      --tags accountName="sp-d" accountKey="xyz"
 
 az network virtual-appliance show --name $nva -g $rg 
@@ -108,7 +79,21 @@ az network virtual-appliance delete --name $nva -g $rg
 az network vhub delete -n $hub -g $rg
 az network vwan delete -n $vwan -g $rg
 
+# test with VMSS
+rg=test-vmss-gnva5
+az group create --name $rg --location westcentralus
+az vmss create \
+   --resource-group $rg \
+   --name gnvavmss \
+   --custom-data $gnva_cloudinit \
+   --authentication-type all \
+   --admin-username azadmin3 \
+   --admin-password Microsoft123! \
+   --image "/subscriptions/bb0a98e0-34e3-40d1-856f-899c5203df01/resourceGroups/g_nva-image/providers/Microsoft.Compute/galleries/g_nva_gallery/images/g_nva/versions/0.1.0" 
 
+
+
+az vmss show 
 
 #VMSS
 rg=az-vwannva-vmss
