@@ -1,0 +1,75 @@
+{
+    "type": "Microsoft.VirtualMachineImages",
+    "apiVersion": "2019-05-01-preview",
+    "location": "westcentralus",
+    "dependsOn": [],
+    "tags": {
+        "imagebuilderTemplate": "AzureImageBuilderSIG",
+        "userIdentity": "enabled"
+            },
+        "identity": {
+            "type": "UserAssigned",
+                    "userAssignedIdentities": {
+                    "/subscriptions/bb0a98e0-34e3-40d1-856f-899c5203df01/resourcegroups/g_nva-image/providers/Microsoft.ManagedIdentity/userAssignedIdentities/aibBuiUserId1614886257": {}
+                        
+                }
+                },
+    
+    "properties": {
+
+        "buildTimeoutInMinutes" : 80,
+
+        "vmProfile": 
+            {
+            "vmSize": "Standard_D1_v2",
+            "osDiskSizeGB": 30
+            },
+        
+        "source": {
+            "type": "PlatformImage",
+                "publisher": "Canonical",
+                "offer": "UbuntuServer",
+                "sku": "18.04-LTS",
+                "version": "latest"
+            
+        },
+        "customize": [
+            {
+                "type": "Shell",
+                "name": "setMOTD",
+                "inline": [
+                        "echo \"*t**********************************************************************v*\" | sudo tee -a /etc/motd",
+                        "echo \"**\" | sudo tee -a /etc/motd",
+                        "echo \"**           This VM is based on Ubuntu 18.04 LTS\" | sudo tee -a /etc/motd",
+                        "echo \"**           Target use: act as a generic NVA in VWAN\" | sudo tee -a /etc/motd",
+                        "echo \"**    How to: leverage cloud-init to deploy StrongSwan (VPN) / Bird (BGP)\" | sudo tee -a /etc/motd",
+                        "echo \"**\" | sudo tee -a /etc/motd",
+                        "echo \"**\" | sudo tee -a /etc/motd",
+                        "echo \"*j**********************************************************************m*\" | sudo tee -a /etc/motd"
+                ]
+            },
+            {
+                "type": "Shell",
+                "name": "InstallUpgrades",
+                "inline": [
+                    "sudo apt install unattended-upgrades"
+                ]
+            }
+        ],
+        "distribute": 
+        [
+            {   
+                "type": "SharedImage",
+                "galleryImageId": "/subscriptions/bb0a98e0-34e3-40d1-856f-899c5203df01/resourceGroups/g_nva-image/providers/Microsoft.Compute/galleries/g_nva_gallery/images/g_nva/versions/0.1.0",
+                "runOutputName": "g_nva",
+                "artifactTags": {
+                    "source": "azureVmImageBuilder",
+                    "baseosimg": "ubuntu1804"
+                },
+                "replicationRegions": [
+                  "eastus2"
+                ]
+            }
+        ]
+    }
+}

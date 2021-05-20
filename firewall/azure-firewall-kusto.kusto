@@ -125,6 +125,12 @@ AzureDiagnostics
 // extract RuleCollection and Rule information, then remove it from further parsing
 | parse msg_s with * ". Rule Collection: " RuleCollection ". Rule: " Rule
 | extend msg_s = replace(@'(. Rule Collection:).*','', msg_s)
+// extract Rule Collection Group information, then remove it from further parsing
+| parse msg_s with * ". Rule Collection Group: " RuleCollectionGroup
+| extend msg_s = replace(@'(. Rule Collection Group:).*','', msg_s)
+// extract Policy information, then remove it from further parsing
+| parse msg_s with * ". Policy: " Policy
+| extend msg_s = replace(@'(. Policy:).*','', msg_s)
 // extract IDS fields, for now it's always add the end, then remove it from further parsing
 | parse msg_s with * ". Signature: " IDSSignatureIDInt ". IDS: " IDSSignatureDescription ". Priority: " IDSPriorityInt ". Classification: " IDSClassification
 | extend msg_s = replace(@'(. Signature:).*','', msg_s)
@@ -144,7 +150,11 @@ AzureDiagnostics
     SourcePort = iif(SourceIP contains ":",strcat_array(split(SourceIP,":",1),""),""),
     Target = iif(Target contains ":",strcat_array(split(Target,":",0),""),Target),
     TargetPort = iif(SourceIP contains ":",strcat_array(split(Target,":",1),""),""),
+    Action = iif(Action contains ".",strcat_array(split(Action,".",0),""),Action),
+    Policy = case(RuleCollection contains ":", split(RuleCollection, ":")[0] ,Policy),
+    RuleCollectionGroup = case(RuleCollection contains ":", split(RuleCollection, ":")[1], RuleCollectionGroup),
+    RuleCollection = case(RuleCollection contains ":", split(RuleCollection, ":")[2], RuleCollection),
     IDSSignatureID = tostring(IDSSignatureIDInt),
     IDSPriority = tostring(IDSPriorityInt)
-| project msg_original,TimeGenerated,Protocol,SourceIP,SourcePort,Target,TargetPort,URL,Action, NatDestination, OperationName,ThreatIntel,IDSSignatureID,IDSSignatureDescription,IDSPriority,IDSClassification,RuleCollection,Rule,WebCategory
+| project msg_original,TimeGenerated,Protocol,SourceIP,SourcePort,Target,TargetPort,URL,Action, NatDestination, OperationName,ThreatIntel,IDSSignatureID,IDSSignatureDescription,IDSPriority,IDSClassification,Policy,RuleCollectionGroup,RuleCollection,Rule,WebCategory
 | order by TimeGenerated

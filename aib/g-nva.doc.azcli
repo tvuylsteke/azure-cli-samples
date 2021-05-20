@@ -1,6 +1,15 @@
-subscription="Azure CXP FTA Internal Subscription THOVUY SIG"
+# Steps below are a combination of Azure Image Builder and Shared Image Gallery
+# Azure Image Builder (AIB) allows for the automated creation of images
+# Shared Image Gallery (SIG) allows for storing and replicating the resulting image
+#
+# The Azure Image Builder piece can be skipped when the goal is to use an existing image and add it to SIG
+# Here you can see how you can create an image based on an existing VM: https://docs.microsoft.com/en-us/azure/virtual-machines/image-version-vm-cli
+#
+# Source: https://docs.microsoft.com/en-us/azure/virtual-machines/linux/image-builder-gallery
+subscription="subscription name"
 az account set --subscription "$subscription"
 
+# Register Azure Image Builder features.
 az feature register --namespace Microsoft.VirtualMachineImages --name VirtualMachineTemplatePreview
 az feature show --namespace Microsoft.VirtualMachineImages --name VirtualMachineTemplatePreview -o json | grep state
 
@@ -17,34 +26,24 @@ az provider register -n Microsoft.Storage
 az provider register -n Microsoft.Network
 
 subscriptionID=$(az account show --query id --output tsv)
-# Resource group name - we are using ibLinuxGalleryRG in this example
 sigResourceGroup=g_nva-image
-# Datacenter location - we are using West US 2 in this example
 location="westcentralus"
-# name of the shared image gallery - in this example we are using myGallery
 sigName=g_nva_gallery
-# name of the image definition to be created - in this example we are using myImageDef
 imageDefName=g_nva
-# image distribution metadata reference name
 runOutputName=g_nva
 
+#Create the resource group
 az group create -n $sigResourceGroup -l $location
 
 # create user assigned identity for image builder to access the storage account where the script is located
 identityName=aibBuiUserId$(date +'%s')
 az identity create -g $sigResourceGroup -n $identityName
-
-# get identity id
 imgBuilderCliId=$(az identity show -g $sigResourceGroup -n $identityName -o json | grep "clientId" | cut -c16- | tr -d '",')
-
-# get the user identity URI, needed for the template
 imgBuilderId=/subscriptions/$subscriptionID/resourcegroups/$sigResourceGroup/providers/Microsoft.ManagedIdentity/userAssignedIdentities/$identityName
 
 # this command will download an Azure role definition template, and update the template with the parameters specified earlier.
 curl https://raw.githubusercontent.com/danielsollondon/azvmimagebuilder/master/solutions/12_Creating_AIB_Security_Roles/aibRoleImageCreation.json -o aibRoleImageCreation.json
-
 imageRoleDefName="Azure Image Builder Image Def"$(date +'%s')
-
 # update the definition
 sed -i -e "s/<subscriptionID>/$subscriptionID/g" aibRoleImageCreation.json
 sed -i -e "s/<rgName>/$sigResourceGroup/g" aibRoleImageCreation.json
@@ -59,12 +58,12 @@ az role assignment create \
     --role "$imageRoleDefName" \
     --scope /subscriptions/$subscriptionID/resourceGroups/$sigResourceGroup
 
+# create shared image gallery
 az sig create \
     -g $sigResourceGroup \
     --gallery-name $sigName
 
-az vm image list --output table
-
+# create image definition
 az sig image-definition create \
    -g $sigResourceGroup \
    --gallery-name $sigName \
@@ -74,7 +73,7 @@ az sig image-definition create \
    --sku 18.04-LTS \
    --os-type Linux
 
-#only needed first time, renam,e file as you see fit.
+#only needed first time, rename file as you see fit.
 curl https://raw.githubusercontent.com/danielsollondon/azvmimagebuilder/master/quickquickstarts/1_Creating_a_Custom_Linux_Shared_Image_Gallery_Image/helloImageTemplateforSIG.json -o helloImageTemplateforSIG.json
 sed -i -e "s/<subscriptionID>/$subscriptionID/g" helloImageTemplateforSIG.json
 sed -i -e "s/<rgName>/$sigResourceGroup/g" helloImageTemplateforSIG.json
@@ -86,6 +85,7 @@ sed -i -e "s/<runOutputName>/$runOutputName/g" helloImageTemplateforSIG.json
 sed -i -e "s%<imgBuilderId>%$imgBuilderId%g" helloImageTemplateforSIG.json
 #remove unnecessary items from the customize step as well as the replicate to region2 from template
 
+# Create the template
 az resource create \
     --resource-group $sigResourceGroup \
     --properties @imageTemplateforSIG.json \
@@ -93,13 +93,14 @@ az resource create \
     --resource-type Microsoft.VirtualMachineImages/imageTemplates \
     -n g_nva-image
 
+# start the image build
 az resource invoke-action \
      --resource-group $sigResourceGroup \
      --resource-type  Microsoft.VirtualMachineImages/imageTemplates \
      -n g_nva-image \
      --action Run
 
-#test image
+#test the created image
 az vm create \
   --resource-group $sigResourceGroup \
   --name myAibGalleryVM \
@@ -108,59 +109,24 @@ az vm create \
   --image "/subscriptions/$subscriptionID/resourceGroups/$sigResourceGroup/providers/Microsoft.Compute/galleries/$sigName/images/$imageDefName/versions/latest" \
   --generate-ssh-keys
 
-  #add additional region
-  az sig image-version update \
-   --resource-group $sigResourceGroup \
-   --gallery-name $sigName \
-   --gallery-image-definition $imageDefName \
-   --gallery-image-version 0.1.0 \
-   --add publishingProfile.targetRegions  name=eastus2euap
-
-     #add additional region
-  az sig image-version update \
-   --resource-group $sigResourceGroup \
-   --gallery-name $sigName \
-   --gallery-image-definition $imageDefName \
-   --gallery-image-version 0.1.0 \
-   --add publishingProfile.targetRegions  name=eastus2
+#add additional region
+az sig image-version update \
+--resource-group $sigResourceGroup \
+--gallery-name $sigName \
+--gallery-image-definition $imageDefName \
+--gallery-image-version 0.1.0 \
+--add publishingProfile.targetRegions  name=eastus2
 
 
-#read access to GatewayRP and ProdGwmKv
+# Important
+# these steps are required for the VWAN integration to work.
 
-#SIG Gallyer ID
+#SIG Gallery ID
 sigid=$(az sig show -g $sigResourceGroup --gallery-name $sigName --query id -o tsv)
-
-#Principal that requires access
-az ad sp list --display-name "GatewayRP" --query "[].{name:appDisplayName, appId:appId, appOwnerTenantId:appOwnerTenantId,objectId:objectId}" -o tsv
-az ad sp list --display-name "prodnextGWMKV.exe" --query "[].{name:appDisplayName, appId:appId, appOwnerTenantId:appOwnerTenantId,objectId:objectId}" -o tsv
 
 #fixed well known values
 gatewayRP_appid="486c78bf-a0f7-45f1-92fd-37215929e116"
 prodnextGWMKV_appid="f6f9bf50-8786-4efb-a1c6-776f770b4b65"
-
-#unique per tenant
-# MSFT
-#gatewayRP_objectid="1f872e42-5ab1-469f-bfc9-d7ede9accfea"
-#prodnextGWMKV_objectid="23bcaced-aaac-479c-9df7-9a2b770a8935"
-
-gatewayRP_objectid=$(az ad sp show --id $gatewayRP_appid --query objectId -o tsv)
-prodnextGWMKV_objectid=$(az ad sp show --id $prodnextGWMKV_appid --query objectId -o tsv)
-
-az role assignment create --assignee $gatewayRP_objectid --role "Reader" --scope $sigid
-az role assignment create --assignee $prodnextGWMKV_objectid --role "Reader" --scope $sigid
-
-#cross tenant
-#https://stackoverflow.com/questions/52646321/grant-service-principal-access-to-application-in-other-tenant
-#$spInOneTenant = New-AzureADServicePrincipal -AppId <app-id-in-other-tenant>
-#New-AzureADServiceAppRoleAssignment `
-#    -Id <role-id> `
-#    -ObjectId <object-id-of-sp-in-one-tenant> `
-#    -PrincipalId <object-id-of-sp-in-one-tenant> `
-#    -ResourceId $spInOneTenant.ObjectId
-
-subscription="MSDN THOVUY P130b"
-az account set --subscription "$subscription"
-
 
 #not necessary SP already exists
 gatewayRP_objectid=$(az ad sp show --id $gatewayRP_appid --query objectId -o tsv)
