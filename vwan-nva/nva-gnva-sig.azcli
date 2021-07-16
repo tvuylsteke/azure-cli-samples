@@ -22,24 +22,7 @@ az network vhub create -n $hub --address-prefix 192.168.2.0/24 -g $rg --vwan $vw
 hub_id=$(az network vhub show -n $hub -g $rg --query id -o tsv)
 az network vhub show -n $hub -g $rg
 
-#
-#silver-peak
-#
-az network virtual-appliance create --name $nva -g $rg \
-     --scale-unit 2 \
-     --vendor SilverPeakEdgeConnect \
-     --version latest \
-     --vhub $hub_id \
-     --asn 65100 \
-     --init-config "echo hello" \     
-     --tags accountName="spy" accountKey="xxx"
-
-#for future use     
---properties.SSHPublicKey $public_ssh_key \
-
-#
-#gnva
-#
+# Create cloudinit file
 cat <<EOF > $gnva_cloudinit
 #cloud-config
 users:
@@ -50,14 +33,19 @@ users:
      - $public_ssh_key
 packages:
   - jq
+runcmd:
+  - apt update
+  - UCF_FORCE_CONFOLD=1 DEBIAN_FRONTEND=noninteractive apt install -y bird strongswan
+  - sysctl -w net.ipv4.ip_forward=1
+  - sysctl -w net.ipv4.conf.all.accept_redirects = 0 
+  - sysctl -w net.ipv4.conf.all.send_redirects = 0
 EOF
-
 cloudinit_string=$(cat $gnva_cloudinit | python3 -c 'import json, sys; print( json.dumps( sys.stdin.read() ) )')
 
 #base64 is not needed
 #base64_cloudinit=$(cat $gnva_cloudinit | base64 -w 0)
 #echo $base64_cloudinit | base64 -d
-
+#this doesn't work?
 az network virtual-appliance create --name $nva -g $rg \
      --scale-unit 2 \
      --vendor Contoso_generic_test_nva \
@@ -72,7 +60,6 @@ az network virtual-appliance create --name $nva -g $rg \
 # gnva over REST API
 #
 # REST
-cloudinit_string=$(cat $gnva_cloudinit | python3 -c 'import json, sys; print( json.dumps( sys.stdin.read() ) )')
 json_payload='{
   "properties": {
     "nvaSku": {
@@ -127,28 +114,6 @@ az deployment group create -g $rg --template-file ./vmss-arm-template/template.j
 #current mp image
 az deployment group create -g $rg --template-file ./vmss-arm-template/template_current.json --parameters ./vmss-arm-template/parameters.json #--parameters adminPublicKey=$sshkey
 
-# VWAN onboarding info
-# SP
-
-{
-"Publisher": "silver-peak-systems",
-"Offer": "silver_peak_edgeconnect_vwan",
-"Vendor": "SilverPeakEdgeConnect",
-"Sku": "silver_peak_edgeconnect_vwan_8_1_9_4",
-"Properties": {
-"AvailableVersions": [ "latest"],
-"AvailableScaleUnits": [
-{
-"ScaleUnit": "2",
-"VmSku": "Standard_D2_v2",
-"InstanceCount": "2"
-}
-],
-"AllowedInboundPorts": [ "22,443" ],
-"AllowedOutboundPorts": [ "*" ]
-}
-}
-
 #gnva onboarding
 {
   "Publisher": "Contoso",
@@ -170,33 +135,6 @@ az deployment group create -g $rg --template-file ./vmss-arm-template/template_c
   "AllowedOutboundPorts": [ "*" ]
 }
 }
-
-
-# request SP
-
-resources.azure.com/raw
-
-PUT https://management.azure.com/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva/providers/Microsoft.Network/networkVirtualAppliances/nvasp3?api-version=2020-07-01
-
-{ 
-    "properties": { 
-        "nvaSku": { 
-            "vendor": "SilverPeakEdgeConnect", 
-            "bundledScaleUnit": "2", 
-            "marketPlaceVersion": "latest" 
-        }, 
-        "virtualHub": { 
-            "id": "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva/providers/Microsoft.Network/virtualHubs/we-hub2" 
-        }, 
-        "virtualApplianceAsn": 64512,
-        "SSHPublicKey": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC+OLyFTWdhcfLkKIWRbwbMdXsmlqEZFH2sJfQgWlw+yrqJumnZ18K1K7RKISvXiaa2Ij/cmts1exwzf/OHwwiIGYxliL77wRvxYu52CXw2KmWTfp8YXcwhXZFXtiKHYAIQvEhVYOtShR5labsz1fsWMcBKRuxvmMvZuaRt4Rl3q20m1sfNgnL300CI2E5tkCEcvUKadVA5IU6hbEQBqYZzaKjP+ra2WqjkOZ8dSraOQB1COfRmXncLl4wImuNyORDFhbfD89yX+Xp1od7Earz6MrjPG1irddcD5Zd4qYMyfCeUqad3awxmWmO4H11lzYBz8w9CBLUh0Aio/3mmuFid",
-        "cloudInitConfiguration": "echo hello" 
-    }, 
-    "id": "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/az-vwannva/providers/Microsoft.Network/networkVirtualAppliances/nva", 
-    "name": "nvasp3", 
-    "type": "Microsoft.Network/NetworkVirtualAppliances", 
-    "location": "westcentralus" 
-} 
 
 # request GNVA
 
@@ -234,3 +172,24 @@ az network virtual-appliance create --name $nva -g $rg \
      --asn 65100 \
      --init-config "$single_line" \
      --tags accountName="sp-d" accountKey="xyz"
+
+
+json_payload='{
+  "properties": {
+    "nvaSku": {
+      "vendor": "Contoso_generic_test_nva",
+      "bundledScaleUnit": "2",
+      "marketPlaceVersion": "latest"
+    },
+    "virtualHub": {
+      "id": "'$hub_id'"
+    },
+    "virtualApplianceAsn": 65100  
+  },
+  "location": "'$location'",
+  "tags": {
+    "tagexample1": "tagvalue1"
+  }
+}'
+
+

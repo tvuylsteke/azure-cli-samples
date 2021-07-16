@@ -47,20 +47,13 @@
                         "echo \"**\" | sudo tee -a /etc/motd",
                         "echo \"*j**********************************************************************m*\" | sudo tee -a /etc/motd"
                 ]
-            },
-            {
-                "type": "Shell",
-                "name": "InstallUpgrades",
-                "inline": [
-                    "sudo apt install unattended-upgrades"
-                ]
             }
         ],
         "distribute": 
         [
             {   
                 "type": "SharedImage",
-                "galleryImageId": "/subscriptions/bb0a98e0-34e3-40d1-856f-899c5203df01/resourceGroups/g_nva-image/providers/Microsoft.Compute/galleries/g_nva_gallery/images/g_nva/versions/0.1.0",
+                "galleryImageId": "/subscriptions/bb0a98e0-34e3-40d1-856f-899c5203df01/resourceGroups/g_nva-image/providers/Microsoft.Compute/galleries/g_nva_gallery/images/g_nva/versions/0.2.0",
                 "runOutputName": "g_nva",
                 "artifactTags": {
                     "source": "azureVmImageBuilder",

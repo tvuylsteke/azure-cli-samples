@@ -1,0 +1,32 @@
+subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
+admin_password=$(az keyvault secret show --id https://setspnvault.vault.azure.net/secrets/local-vm-password/efcdc715a1de4dca90806409730fb638 --query 'value' -o tsv)
+admin_user=azadmin
+az account set --subscription "$subscription"
+
+rg=vpn-nat-lab-branch3
+location=westeurope
+
+az group create --name $rg --location $location
+az network vnet create --resource-group $rg --name $rg --location $location --address-prefixes 192.168.1.0/24 --subnet-name servers --subnet-prefix 192.168.1.0/25
+az network vnet subnet create --address-prefix 192.168.1.128/25 --name GatewaySubnet --resource-group $rg --vnet-name $rg
+
+az network public-ip create --name VPN-PIP --resource-group $rg --allocation-method Dynamic --location $location
+az network vnet-gateway create -g $rg --sku VpnGw1 --gateway-type Vpn --vpn-type RouteBased --vnet $rg -n VPNGW --public-ip-address VPN-PIP --location $location --no-wait
+
+az network public-ip create --name branch-vm-pip --resource-group $rg --location $location --allocation-method Dynamic
+az network nic create --resource-group $rg -n branch-vm-nic --location $location --subnet servers --vnet-name $rg --public-ip-address branch-vm-pip --private-ip-address 192.168.1.4
+az vm create -n branch-vm -g $rg --image UbuntuLTS --admin-username $admin_user --admin-password $admin_password --nics branch-vm-nic --no-wait
+
+az network public-ip create --name branch-vmnt-pip --resource-group $rg --location $location --allocation-method Dynamic
+az network nic create --resource-group $rg -n branch-vmnt-nic --location $location --subnet servers-nt --vnet-name $rg --public-ip-address branch-vmnt-pip --private-ip-address 192.168.1.68
+az vm create -n branch-vmnt -g $rg --image UbuntuLTS --admin-username $admin_user --admin-password $admin_password --nics branch-vmnt-nic --no-wait
+
+
+# configure connection
+az network local-gateway create --gateway-ip-address 52.250.120.19 -n AZNET -g $rg --local-address-prefixes 192.168.100.4/32 --asn 65050 --bgp-peering-address 192.168.100.4 -l westus2
+#Get ID
+vpngw_id=$(az network vnet-gateway show -n VPNGW -g $rg --query id -o tsv)
+#Get ID
+lng_id=$(az network local-gateway show -n AZNET -g $rg --query id -o tsv)
+#Create connection
+az network vpn-connection create -n AZNETtoBranch -g AZNET --vnet-gateway1 $vpngw_id -l $location --shared-key "abc123" --local-gateway2 $lng_id

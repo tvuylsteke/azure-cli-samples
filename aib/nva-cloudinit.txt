@@ -7,9 +7,3 @@ users:
      - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC+OLyFTWdhcfLkKIWRbwbMdXsmlqEZFH2sJfQgWlw+yrqJumnZ18K1K7RKISvXiaa2Ij/cmts1exwzf/OHwwiIGYxliL77wRvxYu52CXw2KmWTfp8YXcwhXZFXtiKHYAIQvEhVYOtShR5labsz1fsWMcBKRuxvmMvZuaRt4Rl3q20m1sfNgnL300CI2E5tkCEcvUKadVA5IU6hbEQBqYZzaKjP+ra2WqjkOZ8dSraOQB1COfRmXncLl4wImuNyORDFhbfD89yX+Xp1od7Earz6MrjPG1irddcD5Zd4qYMyfCeUqad3awxmWmO4H11lzYBz8w9CBLUh0Aio/3mmuFid
 packages:
   - jq
-runcmd:
-  - apt update
-  - UCF_FORCE_CONFOLD=1 DEBIAN_FRONTEND=noninteractive apt install -y bird strongswan
-  - sysctl -w net.ipv4.ip_forward=1
-  - sysctl -w net.ipv4.conf.all.accept_redirects = 0 
-  - sysctl -w net.ipv4.conf.all.send_redirects = 0

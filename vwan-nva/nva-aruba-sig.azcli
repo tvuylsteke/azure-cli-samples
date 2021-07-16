@@ -1,0 +1,79 @@
+
+#subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
+subscription="Azure CXP FTA Internal Subscription THOVUY SIG"
+
+#select subscription
+az account set --subscription "$subscription"
+
+rg=thovuy-gnva
+location=westcentralus
+username=$(whoami)
+public_ssh_key=$(more ~/.ssh/id_rsa.pub)
+gnva_cloudinit="nva-cloudinit.txt"
+
+vwan=thovuy-vwan
+hub=thovuy-hub
+nva=thovuy-nva
+
+az group create -n $rg -l $location
+az network vwan create -n $vwan -g $rg -l $location
+az network vhub create -n $hub --address-prefix 192.168.2.0/24 -g $rg --vwan $vwan -l $location
+
+hub_id=$(az network vhub show -n $hub -g $rg --query id -o tsv)
+az network vhub show -n $hub -g $rg
+
+json_payload='{
+  "properties": {
+    "nvaSku": {
+      "vendor": "ArubaEdgeConnect",
+      "bundledScaleUnit": "2",
+      "marketPlaceVersion": "latest"
+    },
+    "virtualHub": {
+      "id": "'$hub_id'"
+    },
+    "virtualApplianceAsn": 65100,
+    "cloudInitConfiguration": "hello world"
+  },
+  "location": "'$location'",
+  "tags": {
+    "tagexample1": "tagvalue1"
+  }
+}'
+uri="/subscriptions/bb0a98e0-34e3-40d1-856f-899c5203df01/resourceGroups/${rg}/providers/Microsoft.Network/NetworkVirtualAppliances/${nva}?api-version=2021-02-01"
+az rest --method PUT --uri $uri --body "$json_payload"
+
+# Aruba SIG
+{
+  "Publisher": "aruba",
+  "Offer": "aruba_edge_connect_in_vhub",
+  "Vendor": "ArubaEdgeConnect",
+  "Sku": "aruba_edge_connect_in_vhub",
+  "SkuType": "test",
+  "ImageGalleryUri": "/subscriptions/9512788d-90b2-42d7-aa25-f172e4969c82/resourceGroups/DFernando-NVA-Testing/providers/Microsoft.Compute/galleries/EdgeConnectNVA/images/ArubaEdgeConnect-8.3.0.16_85050p",
+  "Properties": {
+    "AvailableVersions": [
+       "8.3.0","latest"
+    ],
+    "AvailableScaleUnits": [
+      {
+        "ScaleUnit": "2",
+        "VmSku": "Standard_D2_v2",
+        "InstanceCount": "2"
+      }
+    ],
+    "AllowedInboundPorts": [
+      "22,443"
+    ],
+    "AllowedOutboundPorts": [
+      "*"
+    ],
+    "MarketplaceLink": "aka.ms/testsku",
+    "HealthDefinition" : {
+    "Protocol" : "",
+    "Port": "",
+    "RequestPath": ""
+  }
+  }
+}
+
