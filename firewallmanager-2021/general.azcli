@@ -1,0 +1,16 @@
+logws_name=log$RANDOM
+az monitor log-analytics workspace create -n $logws_name -g $rg
+
+admin_password=Microsoft123!
+onprem1CSRpIP=52.161.9.115
+onprem1CSRpeerIP=10.11.10.132
+onprem1CSRasn=65001
+az network vpn-site create --ip-address $onprem1CSRpIP --name branch1 --resource-group $rg --bgp-peering-address $onprem1CSRpeerIP --device-model CSR --device-vendor Cisco --virtual-wan thovuy-vwan --asn $onprem1CSRasn
+az network vpn-gateway connection create -n branch1 --gateway-name d23ecb75a6a64551adf5d49cbe478b35-westcentralus-gw -g $rg --remote-vpn-site branch1 --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password"
+
+admin_password=Microsoft123!
+onprem1CSRpIP=13.78.229.21
+onprem1CSRpeerIP=10.12.10.132
+onprem1CSRasn=65002
+az network vpn-site create --ip-address $onprem1CSRpIP --name branch2 --resource-group $rg --bgp-peering-address $onprem1CSRpeerIP --device-model CSR --device-vendor Cisco --virtual-wan thovuy-vwan --asn $onprem1CSRasn
+az network vpn-gateway connection create -n branch2 --gateway-name 862cd9724eb94fdaa7b3ecdac0972a29-westcentralus-gw -g $rg --remote-vpn-site branch2 --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password"

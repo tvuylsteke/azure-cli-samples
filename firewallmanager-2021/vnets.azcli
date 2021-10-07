@@ -1,0 +1,59 @@
+subscription="MSDN THOVUY P130b"
+admin_password=Microsoft123!
+admin_user=azadmin
+loc="westcentralus"
+rg=thovuy-gnva
+
+#select subscription
+az account set --subscription "$subscription"
+
+#Resource Group
+az group create -n $rg -l $loc
+
+#VNET11
+hubrange=10.11.1.0/24
+hubserversrange=10.11.1.0/25
+vnet=vnet11
+subnet=servers
+az network vnet create -g $rg -n $vnet --address-prefix $hubrange --subnet-name $subnet --subnet-prefix $hubserversrange -l $loc
+#test VMs
+name=vm-vnet11
+az vm create --image ubuntults -g $rg -n $name --generate-ssh-keys -l $loc --public-ip-address "$name-pip" --vnet-name $vnet --subnet $subnet --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s --no-wait
+pip=$(az network public-ip show -n "$name-pip" -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+#VNET12
+hubrange=10.11.2.0/24
+hubserversrange=10.11.2.0/25
+vnet=vnet12
+subnet=servers
+az network vnet create -g $rg -n $vnet --address-prefix $hubrange --subnet-name $subnet --subnet-prefix $hubserversrange -l $loc
+#test VMs
+name=vm-vnet12
+az vm create --image ubuntults -g $rg -n $name --generate-ssh-keys -l $loc --public-ip-address "$name-pip" --vnet-name $vnet --subnet $subnet --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s --no-wait
+pip=$(az network public-ip show -n "$name-pip" -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+#VNET21
+hubrange=10.12.1.0/24
+hubserversrange=10.12.1.0/25
+vnet=vnet21
+subnet=servers
+az network vnet create -g $rg -n $vnet --address-prefix $hubrange --subnet-name $subnet --subnet-prefix $hubserversrange -l $loc
+#test VMs
+name=vm-vnet21
+az vm create --image ubuntults -g $rg -n $name --generate-ssh-keys -l $loc --public-ip-address "$name-pip" --vnet-name $vnet --subnet $subnet --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s --no-wait
+pip=$(az network public-ip show -n "$name-pip" -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+
+#connect to VWAN
+vnetid=$(az network vnet show --resource-group $rg --name vnet11 --query id --out tsv)
+az network vhub connection create -n vnet11 --remote-vnet $vnetid -g $rg --vhub-name sechub1
+
+vnetid=$(az network vnet show --resource-group $rg --name vnet12 --query id --out tsv)
+az network vhub connection create -n vnet12 --remote-vnet $vnetid -g $rg --vhub-name sechub1
+
+vnetid=$(az network vnet show --resource-group $rg --name vnet21 --query id --out tsv)
+az network vhub connection create -n vnet21 --remote-vnet $vnetid -g $rg --vhub-name sechub2
+
+
