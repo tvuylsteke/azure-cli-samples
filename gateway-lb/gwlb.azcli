@@ -1,0 +1,188 @@
+subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
+az account set --subscription "$subscription"
+
+az feature register \
+    --name AllowGatewayLoadBalancer \
+    --namespace Microsoft.Network
+
+az provider register \
+    --namespace Microsoft.Network
+
+rg=gwlb
+loc=westeurope
+admin_password=Microsoft123!
+admin_user=azadmin
+
+az group create -n $rg --location $loc
+
+az network vnet create \
+    --resource-group $rg \
+    --location $loc \
+    --name gwlbvnet \
+    --address-prefixes 10.1.0.0/16 \
+    --subnet-name myBackendSubnet \
+    --subnet-prefixes 10.1.0.0/24
+
+az network lb create \
+    --resource-group $rg \
+    --name lbgw \
+    --sku Gateway \
+    --vnet-name gwlbvnet \
+    --subnet myBackendSubnet \
+    --backend-pool-name myBackendPool \
+    --frontend-ip-name myFrontEnd
+
+az network lb address-pool list -g $rg --lb-name lbgw
+
+
+
+az network lb address-pool tunnel-interface list -g $rg --lb-name lbgw --address-pool myBackendPool
+
+[
+  {
+    "identifier": 900,
+    "port": 10800,
+    "protocol": "VXLAN",
+    "type": "Internal"
+  }
+]
+
+
+az network lb address-pool create -g $rg -n myBackEndPool --lb-name lbgw
+
+az network lb address-pool tunnel-interface add \
+    --address-pool myBackEndPool \
+    --identifier '901' \
+    --lb-name lbgw \
+    --protocol VXLAN \
+    --resource-group $rg \
+    --type External \
+    --port '10801'
+
+az network lb probe create \
+    --resource-group $rg \
+    --lb-name lbgw \
+    --name myHealthProbe \
+    --protocol http \
+    --port 80 \
+    --path '/' \
+    --interval '5' \
+    --threshold '2'
+
+az network lb rule create \
+    --resource-group $rg \
+    --lb-name lbgw \
+    --name myLBRule \
+    --protocol All \
+    --frontend-port 0 \
+    --backend-port 0 \
+    --frontend-ip-name myFrontEnd \
+    --backend-pool-name myBackEndPool \
+    --probe-name myHealthProbe
+
+#linux NVA
+
+#WE VNET
+az network vnet subnet create -g $rg -n nvasubnet --vnet-name gwlbvnet --address-prefix 10.1.1.0/24
+
+# NVA
+nva_sku=Standard_B2ms
+publisher=Canonical
+offer=UbuntuServer
+sku=18.04-LTS
+image_urn=$(az vm image list -p $publisher -f $offer -s $sku -l $loc --query '[0].urn' -o tsv)
+
+az vm create -n nva -g $rg -l $loc --image $image_urn --size $nva_sku --generate-ssh-keys \
+  --os-disk-name nva-disk --os-disk-size-gb 32 \
+  --vnet-name gwlbvnet --subnet nvasubnet --public-ip-address nva-pip
+# Enable IP forwarding
+nva_nic_id=$(az vm show -n nva -g $rg --query 'networkProfile.networkInterfaces[0].id' -o tsv)
+az network nic update --ids $nva_nic_id --ip-forwarding true
+# Connect to VM
+nva_pip_ip=$(az network public-ip show -n nva-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $nva_pip_ip >> ~/.ssh/known_hosts
+echo "You can SSH to $nva_pip_ip"
+ssh $nva_pip_ip "sudo sysctl -w net.ipv4.ip_forward=1"
+
+# configure LB for nva
+az vm show -n nva -g $rg --query 'networkProfile.networkInterfaces[0].id' -o tsv
+az network nic show -n nvaVMNic -g $rg
+az network nic ip-config address-pool add --address-pool "/subscriptions/8ae4f1ad-5738-40b4-bf47-dec771721337/resourceGroups/gwlb/providers/Microsoft.Network/loadBalancers/lbgw/backendAddressPools/myBackEndPool" --ip-config-name ipconfignva --nic-name nvaVMNic -g $rg
+
+
+# Deploy web VM
+az vm create -n web -g $rg -l $loc --image $image_urn --size $nva_sku --generate-ssh-keys \
+  --os-disk-name web-disk --os-disk-size-gb 32 \
+  --vnet-name gwlbvnet --subnet myBackendSubnet --public-ip-address web-pip
+
+web_pip_ip=$(az network public-ip show -n web-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $web_pip_ip >> ~/.ssh/known_hosts
+echo "You can SSH to $web_pip_ip"
+
+ssh $web_pip_ip "sudo apt-get update"
+ssh $web_pip_ip "sudo apt-get install apache2"
+ssh $web_pip_ip "sudo ufw allow 'Apache'"
+
+# deploy Web workload LB
+
+az network public-ip create \
+    --resource-group $rg \
+    --name lb-pip \
+    --sku Standard
+
+az network lb create \
+    --resource-group $rg \
+    --name lbweb \
+    --sku Standard \
+    --public-ip-address lb-pip \
+    --frontend-ip-name lbwebfe \
+    --backend-pool-name lbwebbe
+
+az network lb probe create \
+    --resource-group $rg \
+    --lb-name lbweb \
+    --name myHealthProbe \
+    --protocol tcp \
+    --port 80
+
+az network lb rule create \
+    --resource-group $rg \
+    --lb-name lbweb \
+    --name myHTTPRule \
+    --protocol tcp \
+    --frontend-port 80 \
+    --backend-port 80 \
+    --frontend-ip-name lbwebfe \
+    --backend-pool-name lbwebbe \
+    --probe-name myHealthProbe \
+    --disable-outbound-snat true \
+    --idle-timeout 15 \
+    --enable-tcp-reset true
+
+az network nic ip-config address-pool add \
+     --address-pool lbwebbe \
+     --ip-config-name ipconfigweb \
+     --nic-name  webVMNic \
+     --resource-group $rg \
+     --lb-name lbweb
+
+
+
+#chain web LB to NVA LB
+
+#fe for nva lb
+feid=$(az network lb frontend-ip show \
+    --resource-group $rg \
+    --lb-name lbgw \
+    --name myFrontend  \
+    --query id \
+    --output tsv)
+
+#config web lb
+ az network lb frontend-ip update \
+    --resource-group $rg \
+    --name lbwebfe \
+    --lb-name lbweb \
+    --public-ip-address lb-pip \
+    --gateway-lb $feid
+

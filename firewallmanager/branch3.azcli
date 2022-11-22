@@ -1,9 +1,9 @@
 ```
-subscription="MSDN THOVUY P130b"
+subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
 admin_password=Microsoft123!
 admin_user=azadmin
 loc="westeurope"
-rg=az-fw-routing-branch3-rg
+rg=dns-rg
 
 #select subscription
 az account set --subscription "$subscription"

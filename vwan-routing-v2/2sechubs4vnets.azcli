@@ -1,0 +1,340 @@
+#
+#
+#  VWAN + 2 hubs + 4 VNETS on each
+#
+#
+subscription="Azure CXP FTA Internal Subscription THOVUY SIG"
+az account set --subscription "$subscription"
+# depedencies
+#VWAN
+az extension add --name virtual-wan
+
+#variables
+rg=thovuy-gnva
+admin_password=Microsoft123!
+admin_user=azadmin
+
+vm_size=Standard_B1s
+nva_size=Standard_B2ms
+publisher=cisco
+offer=cisco-csr-1000v
+sku=16_12-byol
+version=$(az vm image list -p $publisher -f $offer -s $sku --all --query '[0].version' -o tsv)
+az vm image terms accept --urn ${publisher}:${offer}:${sku}:${version}
+
+################################
+## VWAN Config
+################################
+mainloc="westcentralus"
+secloc="westcentralus"
+
+# Resource Group
+#az group create -n $rg -l $mainloc
+
+# VWAN
+vwan=thovuy-vwan
+az network vwan create -n $vwan -g $rg -l $mainloc
+
+## VWAN HUB
+az network vhub create -n hub1 --address-prefix 192.168.0.0/23 -g $rg --vwan $vwan -l $mainloc
+az network vhub create -n hub2 --address-prefix 192.168.2.0/23 -g $rg --vwan $vwan -l $secloc
+
+## function to create vm/vnet
+function create_vm_vnet {    
+    location=$1
+    vnet_id=$2
+    vnet_prefix=$3
+    subnet_prefix=$4
+
+    echo "Location: $location"
+    echo "VNET name: ${vnet_id}"
+    echo "VNET prefix: $vnet_prefix and subnet prefix: $subnet_prefix"
+    echo "VM name: vnet${vnet_id}-vm"
+    
+    az vm create -n "vnet${vnet_id}-vm" -g "$rg" -l "$location" --image "ubuntuLTS" --size $vm_size \
+            --authentication-type Password --admin-username "$admin_user" --admin-password "$admin_password" \
+            --public-ip-address "vnet${vnet_id}-pip" --vnet-name "${vnet_id}" \
+            --vnet-address-prefix "$vnet_prefix" --subnet vm --subnet-address-prefix "$subnet_prefix" \
+            --no-wait
+}
+
+function create_branch_csr_vnet {    
+    location=$1
+    vnet_id=$2
+    vnet_prefix=$3
+    subnet_prefix=$4
+
+    echo "Location: $location"
+    echo "VNET name: vnet-${vnet_id}-$location"
+    echo "VNET prefix: $vnet_prefix and subnet prefix: $subnet_prefix"
+    echo "CSR name: ${vnet_id}-nva"
+
+    az vm create -n ${vnet_id}-nva -g $rg -l $location --image ${publisher}:${offer}:${sku}:${version} --size $nva_size \
+            --authentication-type Password --admin-username "$admin_user" --admin-password "$admin_password" \
+            --public-ip-address ${vnet_id}-pip --public-ip-address-allocation static \
+            --vnet-name "${vnet_id}-$location" --vnet-address-prefix $vnet_prefix --subnet nva --subnet-address-prefix $subnet_prefix \
+            --no-wait
+}
+
+function connect_vnet_to_hub {
+    vnet=$1
+    vwanhub=$2
+
+    echo "VNET: $vnet"
+    echo "VWAN hub: $vwanhub"
+
+    vnetId=$(az network vnet show --resource-group $rg --name "${vnet}" --query id --out tsv)
+
+    echo "$vnetID"
+
+    az network vhub connection create -n "${vnet}" --remote-vnet $vnetId -g $rg --vhub-name "${vwanhub}"
+}
+
+function disconnect_vnet_from_hub {
+    vnet=$1
+    vwanhub=$2
+
+    echo "VNET: $vnet"
+    echo "VWAN hub: $vwanhub"
+
+    az network vhub connection delete -n "${vnet}" -g $rg --vhub-name "${vwanhub}" -y
+}
+
+function delete_vm_vnet {        
+    vnet_id=$1       
+
+    #echo "Location: $location"
+    #echo "VNET name: ${vnet_id}"
+    #echo "VNET prefix: $vnet_prefix and subnet prefix: $subnet_prefix"
+    echo "VM name: vnet${vnet_id}-vm"
+    
+    vmOSDisk=$(az vm show -d -g $rg -n "vnet${vnet_id}-vm" --query "storageProfile.osDisk.managedDisk.id" -o tsv);
+
+    az vm delete -n "vnet${vnet_id}-vm" -g "$rg" -y
+    az network nic delete -g $rg -n "vnet${vnet_id}-vmVMNic"
+    az disk delete --ids $vmOSDisk -y
+    az network public-ip delete -g $rg -n "vnet${vnet_id}-pip"
+    az network nsg delete -g $rg -n "vnet${vnet_id}-vmNSG"
+    az network vnet delete -g $rg -n $vnet_id
+}
+
+################################
+## VNETs connected to VWAN hubs
+################################
+create_vm_vnet $mainloc spoke11 10.1.1.0/24 10.1.1.0/26
+create_vm_vnet $mainloc  spoke12 10.1.2.0/24 10.1.2.0/26
+create_vm_vnet $mainloc  spoke13 10.1.3.0/24 10.1.3.0/26
+create_vm_vnet $mainloc  spoke14 10.1.4.0/24 10.1.4.0/26
+
+create_vm_vnet $secloc spoke21 10.2.1.0/24 10.2.1.0/26
+create_vm_vnet $secloc spoke22 10.2.2.0/24 10.2.2.0/26
+create_vm_vnet $secloc spoke23 10.2.3.0/24 10.2.3.0/26
+create_vm_vnet $secloc spoke24 10.2.4.0/24 10.2.4.0/26
+
+connect_vnet_to_hub spoke11 hub1
+connect_vnet_to_hub spoke12 hub1
+connect_vnet_to_hub spoke13 hub1
+connect_vnet_to_hub spoke14 hub1
+
+connect_vnet_to_hub spoke21 hub2
+connect_vnet_to_hub spoke22 hub2
+connect_vnet_to_hub spoke23 hub2
+connect_vnet_to_hub spoke24 hub2
+
+
+################################
+## Secure Hubs
+################################
+
+ # Create Azure Firewall policy with sample policies
+azfw_policy_name=vwanfwpolicy
+az network firewall policy create -n $azfw_policy_name -g $rg
+az network firewall policy rule-collection-group create -n ruleset01 --policy-name $azfw_policy_name -g $rg --priority 100
+# Allow SSH and HTTP for connection monitor (uses TCP9 too)
+echo "Creating rule to allow SSH and HTTP..."
+az network firewall policy rule-collection-group collection add-filter-collection --policy-name $azfw_policy_name --rule-collection-group-name ruleset01 -g $rg \
+    --name mgmt --collection-priority 101 --action Allow --rule-name allowSSHnHTTP --rule-type NetworkRule --description "TCP 22" \
+    --destination-addresses 10.0.0.0/8 172.16.0.0/12 20.0.0.0/6 --source-addresses 10.0.0.0/8 172.16.0.0/12 20.0.0.0/6 --ip-protocols TCP --destination-ports 9 22 80
+# Allow ICMP
+echo "Creating rule to allow ICMP..."
+az network firewall policy rule-collection-group collection add-filter-collection --policy-name $azfw_policy_name --rule-collection-group-name ruleset01 -g $rg \
+    --name icmp --collection-priority 102 --action Allow --rule-name allowICMP --rule-type NetworkRule --description "ICMP traffic" \
+    --destination-addresses 10.0.0.0/8 172.16.0.0/12 20.0.0.0/6 --source-addresses 10.0.0.0/8 172.16.0.0/12 20.0.0.0/6 --ip-protocols ICMP --destination-ports "1-65535" >/dev/null
+#Allow NTP
+#echo "Creating rule to allow NTP..."
+#az network firewall policy rule-collection-group collection add-filter-collection --policy-name $azfw_policy_name --rule-collection-group-name ruleset01 -g $rg \
+#    --name ntp --collection-priority 103 --action Allow --rule-name allowNTP --rule-type NetworkRule --description "Egress NTP traffic" \
+#    --destination-addresses '*' --source-addresses "10.0.0.0/8" "20.0.0.0/6" --ip-protocols UDP --destination-ports "123"
+# Example application collection with 2 rules (ipconfig.co, api.ipify.org)
+echo "Creating rule to allow ifconfig.co and api.ipify.org..."
+az network firewall policy rule-collection-group collection add-filter-collection --policy-name $azfw_policy_name --rule-collection-group-name ruleset01 -g $rg \
+    --name ifconfig --collection-priority 201 --action Allow --rule-name allowIfconfig --rule-type ApplicationRule --description "ifconfig" \
+    --target-fqdns "ifconfig.co" --source-addresses "10.0.0.0/8" "172.16.0.0/12" "20.0.0.0/6" --protocols Http=80 Https=443
+az network firewall policy rule-collection-group collection rule add -g $rg --policy-name $azfw_policy_name --rule-collection-group-name ruleset01 --collection-name ifconfig \
+    --name ipify --target-fqdns "api.ipify.org" --source-addresses "10.0.0.0/8" "172.16.0.0/12" "20.0.0.0/6" --protocols Http=80 Https=443 --rule-type ApplicationRule
+# Example application collection with wildcards (*.ubuntu.com)
+echo "Creating rule to allow *.ubuntu.com..."
+az network firewall policy rule-collection-group collection add-filter-collection --policy-name $azfw_policy_name --rule-collection-group-name ruleset01 -g $rg \
+    --name ubuntu --collection-priority 202 --action Allow --rule-name repos --rule-type ApplicationRule --description "ubuntucom" \
+    --target-fqdns 'ubuntu.com' '*.ubuntu.com' --source-addresses '*' --protocols Http=80 Https=443
+# Mgmt traffic to Azure
+az network firewall policy rule-collection-group collection add-filter-collection --policy-name $azfw_policy_name --rule-collection-group-name ruleset01 -g $rg \
+    --name azure --collection-priority 203 --action Allow --rule-name azmonitor --rule-type ApplicationRule --description "Azure Monitor" \
+    --target-fqdns '*.opinsights.azure.com' '*.azure-automation.net' --source-addresses '*' --protocols Https=443
+
+
+
+
+# Create Azure Firewalls in the virtual hubs
+az network firewall create -n azfw1 -g $rg --vhub hub1 --policy $azfw_policy_name -l $mainloc --sku AZFW_Hub --public-ip-count 1
+az network firewall create -n azfw2 -g $rg --vhub hub2 --policy $azfw_policy_name -l $secloc --sku AZFW_Hub --public-ip-count 1
+
+# Configure VPN gateways to log to Azure Monitor
+# Create LA workspace if it doesnt exist
+logws_name=$(az monitor log-analytics workspace list -g $rg --query '[0].name' -o tsv)
+if [[ -z "$logws_name" ]]
+then
+    logws_name=vwanlogs$RANDOM
+    echo "Creating log analytics workspace $logws_name..."
+    az monitor log-analytics workspace create -n $logws_name -g $rg -l $mainloc
+fi
+logws_id=$(az resource list -g $rg -n $logws_name --query '[].id' -o tsv)
+logws_customerid=$(az monitor log-analytics workspace show -n $logws_name -g $rg --query customerId -o tsv)
+
+# Azure Firewalls
+echo "Configuring Azure Firewalls..."
+fw_id_list=$(az network firewall list -g $rg --query '[].id' -o tsv)
+while IFS= read -r fw_id; do
+    az monitor diagnostic-settings create -n mydiag --resource $fw_id --workspace $logws_id \
+        --metrics '[{"category": "AllMetrics", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false }, "timeGrain": null}]' \
+        --logs '[{"category": "AzureFirewallApplicationRule", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false}}, 
+                {"category": "AzureFirewallNetworkRule", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false}}]' >/dev/null
+done <<< "$fw_id_list"
+
+################################
+## VPN GWs
+################################
+# Create VPN gateways (not using --no-wait to avoid race conditions due to parallelism)
+az network vpn-gateway create -n hub1vpn -g $rg -l $mainloc --vhub hub1 --asn 65515
+az network vpn-gateway create -n hub2vpn -g $rg -l $secloc --vhub hub2 --asn 65515
+
+branch1_prefix=10.201.0.0/24
+branch1_prefix_long="10.201.0.0 255.255.255.0"
+branch1_subnet=10.201.0.0/26
+branch1_vm_subnet=10.201.0.64/26
+branch1_gateway=10.201.0.1
+branch1_bgp_ip=10.201.0.4
+branch1_asn=65501
+branch2_prefix=10.202.0.0/24
+branch2_prefix_long="10.202.0.0 255.255.255.0"
+branch2_vm_subnet=10.202.0.64/26
+branch2_subnet=10.202.0.0/26
+branch2_gateway=10.202.0.1
+branch2_bgp_ip=10.202.0.4
+branch2_2ary_bgp_ip=10.202.0.20
+branch2_asn=65502
+
+# Create CSR to simulate branch1
+create_branch_csr_vnet $mainloc branch1 $branch1_prefix $branch1_subnet
+branch1_ip=$(az network public-ip show -n branch1-pip -g $rg --query ipAddress -o tsv)
+#wait until IP is populated
+az network vpn-site create -n branch1 -g $rg -l $mainloc --virtual-wan $vwan \
+    --asn $branch1_asn --bgp-peering-address $branch1_bgp_ip --ip-address $branch1_ip --address-prefixes ${branch1_ip}/32 --device-vendor cisco --device-model csr --link-speed 100
+
+az network vpn-gateway connection create -n branch1 --gateway-name hub1vpn -g $rg --remote-vpn-site branch1 \
+    --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password" #--connection-bandwidth 100 --routing-weight 10 \
+    #--associated-route-table $hub1_default_rt_id --propagated-route-tables $hub1_default_rt_id --labels default --internet-security true
+
+# Create CSR to simulate branch2
+create_branch_csr_vnet $mainloc branch2  $branch2_prefix $branch2_subnet
+branch2_ip=$(az network public-ip show -n branch2-pip -g $rg --query ipAddress -o tsv)
+#wait until IP is populated
+az network vpn-site create -n branch2 -g $rg -l $secloc --virtual-wan $vwan \
+    --asn $branch2_asn --bgp-peering-address $branch2_bgp_ip --ip-address $branch2_ip --address-prefixes ${branch2_ip}/32
+
+az network vpn-gateway connection create -n branch2 --gateway-name hub2vpn -g $rg --remote-vpn-site branch2 \
+    --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password" #--connection-bandwidth 100 --routing-weight 10 \
+    #--associated-route-table $hub2_default_rt_id --propagated-route-tables $hub2_default_rt_id  --labels default --internet-security true
+
+branch11_prefix=10.211.0.0/24
+branch11_prefix_long="10.211.0.0 255.255.255.0"
+branch11_subnet=10.211.0.0/26
+branch11_vm_subnet=10.211.0.64/26
+branch11_gateway=10.211.0.1
+branch11_bgp_ip=10.211.0.4
+branch11_asn=65511
+
+# Create CSR to simulate branch11
+create_branch_csr_vnet $mainloc branch11 $branch11_prefix $branch11_subnet
+branch11_ip=$(az network public-ip show -n branch11-pip -g $rg --query ipAddress -o tsv)
+#wait until IP is populated
+az network vpn-site create -n branch11 -g $rg -l $mainloc --virtual-wan $vwan \
+    --asn $branch11_asn --bgp-peering-address $branch11_bgp_ip --ip-address $branch11_ip --address-prefixes ${branch11_ip}/32 --device-vendor cisco --device-model csr --link-speed 100
+
+az network vpn-gateway connection create -n branch11 --gateway-name hub1vpn -g $rg --remote-vpn-site branch11 \
+    --enable-bgp true --protocol-type IKEv2 --shared-key "$admin_password" #--connection-bandwidth 100 --routing-weight 10 \
+    #--associated-route-table $hub1_default_rt_id --propagated-route-tables $hub1_default_rt_id --labels default --internet-security true
+
+
+# Configure IP forwarding in the CSR NICs
+vm_names=("branch1-nva" "branch2-nva" "branch11-nva")
+for vm_name in ${vm_names[@]}; do
+    echo "Enabling IP forwarding for $vm_name..."
+    vm_nic_id=$(az vm show -n $vm_name -g $rg --query 'networkProfile.networkInterfaces[0].id' -o tsv)
+    az network nic update --ids $vm_nic_id --ip-forwarding
+done
+
+# Get parameters for VPN GW in hub1
+vpngw1_config=$(az network vpn-gateway show -n hub1vpn -g $rg)
+site=branch1
+vpngw1_gw0_pip=$(echo $vpngw1_config | jq -r '.bgpSettings.bgpPeeringAddresses[0].tunnelIpAddresses[0]')
+vpngw1_gw1_pip=$(echo $vpngw1_config | jq -r '.bgpSettings.bgpPeeringAddresses[1].tunnelIpAddresses[0]')
+vpngw1_gw0_bgp_ip=$(echo $vpngw1_config | jq -r '.bgpSettings.bgpPeeringAddresses[0].defaultBgpIpAddresses[0]')
+vpngw1_gw1_bgp_ip=$(echo $vpngw1_config | jq -r '.bgpSettings.bgpPeeringAddresses[1].defaultBgpIpAddresses[0]')
+vpngw1_bgp_asn=$(echo $vpngw1_config | jq -r '.bgpSettings.asn')  # This is today always 65515
+echo "Extracted info for hubvpn1: Gateway0 $vpngw1_gw0_pip, $vpngw1_gw0_bgp_ip. Gateway1 $vpngw1_gw1_pip, $vpngw1_gw0_bgp_ip. ASN $vpngw1_bgp_asn"
+
+# Get parameters for VPN GW in hub2
+vpngw2_config=$(az network vpn-gateway show -n hub2vpn -g $rg)
+site=branch2
+vpngw2_gw0_pip=$(echo $vpngw2_config | jq -r '.bgpSettings.bgpPeeringAddresses[0].tunnelIpAddresses[0]')
+vpngw2_gw1_pip=$(echo $vpngw2_config | jq -r '.bgpSettings.bgpPeeringAddresses[1].tunnelIpAddresses[0]')
+vpngw2_gw0_bgp_ip=$(echo $vpngw2_config | jq -r '.bgpSettings.bgpPeeringAddresses[0].defaultBgpIpAddresses[0]')
+vpngw2_gw1_bgp_ip=$(echo $vpngw2_config | jq -r '.bgpSettings.bgpPeeringAddresses[1].defaultBgpIpAddresses[0]')
+vpngw2_bgp_asn=$(echo $vpngw2_config | jq -r '.bgpSettings.asn')  # This is today always 65515
+echo "Extracted info for hubvpn2: Gateway0 $vpngw2_gw0_pip, $vpngw2_gw0_bgp_ip. Gateway1 $vpngw2_gw1_pip, $vpngw2_gw1_bgp_ip. ASN $vpngw2_bgp_asn"
+
+# Cleanup
+
+disconnect_vnet_from_hub spoke11 hub1
+disconnect_vnet_from_hub spoke12 hub1
+disconnect_vnet_from_hub spoke13 hub1
+disconnect_vnet_from_hub spoke14 hub1
+
+disconnect_vnet_from_hub spoke21 hub2
+disconnect_vnet_from_hub spoke22 hub2
+disconnect_vnet_from_hub spoke23 hub2
+disconnect_vnet_from_hub spoke24 hub2
+
+delete_vm_vnet spoke11
+delete_vm_vnet spoke12
+delete_vm_vnet spoke13
+delete_vm_vnet spoke14
+
+delete_vm_vnet spoke21
+delete_vm_vnet spoke22
+delete_vm_vnet spoke23
+delete_vm_vnet spoke24
+
+az network firewall delete -g $rg -n azfw1
+az network firewall delete -g $rg -n azfw2
+
+az network vpn-gateway delete -n hub1vpn -g $rg
+az network vpn-gateway delete -n hub2vpn -g $rg
+
+az network vhub delete -n hub1 -g $rg
+az network vhub delete -n hub2 -g $rg
+
+#
+
+az network public-ip list -g $rg --query '[].{Name:name,IP:ipAddress}' -o tsv

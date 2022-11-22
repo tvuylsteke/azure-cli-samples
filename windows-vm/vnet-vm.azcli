@@ -1,0 +1,326 @@
+subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
+#select subscription
+az account set --subscription "$subscription"
+
+
+# Variables
+rg=AC-filecopy
+vm_size=Standard_D4s_v3
+admin_username=azadmin
+admin_password=Microsoft123!
+
+# Create a list of Vnets and a VM in each
+# If the Vnet_id begins with "1", it is created in $location1
+# If the Vnet_id begins with "2", it is created in $location2
+
+function create_vm_vnet {    
+    location=$1
+    vnet_id=$2
+    vnet_prefix=$3
+    subnet_prefix=$4
+
+    echo "Location: $location"
+    echo "VNET name: vnet-${vnet_id}-$location"
+    echo "VNET prefix: $vnet_prefix and subnet prefix: $subnet_prefix"
+    echo "VM name: vnet${vnet_id}-vm"
+    
+    az vm create -n "vnet${vnet_id}-vm" -g "$rg" -l "$location" --image "Win2019Datacenter" --size $vm_size \
+            --authentication-type Password --admin-username "$admin_username" --admin-password "$admin_password" \
+            --public-ip-address "vnet${vnet_id}-pip" --vnet-name "${vnet_id}" \
+            --vnet-address-prefix "$vnet_prefix" --subnet vm --subnet-address-prefix "$subnet_prefix" \
+            --no-wait
+}
+
+#create rg if it doesn't exist
+az group create -n $rg -l westeurope
+
+# in region 2ms
+create_vm_vnet northeurope ne1 10.0.1.0/24 10.0.1.0/26
+create_vm_vnet northeurope ne2 10.0.2.0/24 10.0.2.0/26
+
+vnet1=ne1
+vnet2=ne2
+az network vnet peering create -g $rg -n "${vnet1}-to-${vnet2}" --vnet-name $vnet1 --remote-vnet $vnet2 --allow-vnet-access
+az network vnet peering create -g $rg -n "${vnet2}-to-${vnet1}" --vnet-name $vnet2 --remote-vnet $vnet1 --allow-vnet-access
+
+#ne to we 16ms
+create_vm_vnet westeurope we1 10.0.3.0/24 10.0.3.0/26
+vnet1=ne1
+vnet2=we1
+sleep 5
+az network vnet peering create -g $rg -n "${vnet1}-to-${vnet2}" --vnet-name $vnet1 --remote-vnet $vnet2 --allow-vnet-access
+az network vnet peering create -g $rg -n "${vnet2}-to-${vnet1}" --vnet-name $vnet2 --remote-vnet $vnet1 --allow-vnet-access
+
+#ne to uk south 10ms
+create_vm_vnet uksouth uks1 10.0.4.0/24 10.0.4.0/26
+vnet1=ne1
+vnet2=uks1
+sleep 5
+az network vnet peering create -g $rg -n "${vnet1}-to-${vnet2}" --vnet-name $vnet1 --remote-vnet $vnet2 --allow-vnet-access
+az network vnet peering create -g $rg -n "${vnet2}-to-${vnet1}" --vnet-name $vnet2 --remote-vnet $vnet1 --allow-vnet-access
+
+#ne to uk west 13ms
+create_vm_vnet uksouth ukw1 10.0.5.0/24 10.0.5.0/26
+vnet1=ne1
+vnet2=ukw1
+sleep 5
+az network vnet peering create -g $rg -n "${vnet1}-to-${vnet2}" --vnet-name $vnet1 --remote-vnet $vnet2 --allow-vnet-access
+az network vnet peering create -g $rg -n "${vnet2}-to-${vnet1}" --vnet-name $vnet2 --remote-vnet $vnet1 --allow-vnet-access
+
+#ne to norway east 40ms
+create_vm_vnet norwayeast nwe1 10.0.6.0/24 10.0.6.0/26
+vnet1=ne1
+vnet2=nwe1
+sleep 5
+az network vnet peering create -g $rg -n "${vnet1}-to-${vnet2}" --vnet-name $vnet1 --remote-vnet $vnet2 
+az network vnet peering create -g $rg -n "${vnet2}-to-${vnet1}" --vnet-name $vnet2 --remote-vnet $vnet1
+
+#north Europe to north europe
+$password = ConvertTo-SecureString 'Microsoft123!' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential ('azadmin', $password)
+New-PSDrive -Name "F" -Root "\\10.0.2.4\c$" -Persist -PSProvider "FileSystem" -Credential $cred
+New-Item -ItemType Directory -Path F: -Name "temp"
+.\ac-init.ps1 F:\temp
+2m:47s
+Test-Connection 10.0.2.4
+1ms
+# over VWAN
+New-Item -ItemType Directory -Path F: -Name "temp2"
+.\ac-init.ps1 F:\temp2
+7m:13s
+7m:27s
+Test-Connection 10.0.2.4
+2ms
+# over firewall
+vnet1=ne1
+vnet2=ne-fwvnet
+az network vnet peering create -g $rg -n "${vnet1}-to-${vnet2}" --vnet-name $vnet1 --remote-vnet $vnet2 --allow-vnet-access --allow-forwarded-traffic
+az network vnet peering create -g $rg -n "${vnet2}-to-${vnet1}" --vnet-name $vnet2 --remote-vnet $vnet1 --allow-vnet-access --allow-forwarded-traffic
+vnet1=ne2
+vnet2=ne-fwvnet
+az network vnet peering create -g $rg -n "${vnet1}-to-${vnet2}" --vnet-name $vnet1 --remote-vnet $vnet2 --allow-vnet-access --allow-forwarded-traffic
+az network vnet peering create -g $rg -n "${vnet2}-to-${vnet1}" --vnet-name $vnet2 --remote-vnet $vnet1 --allow-vnet-access --allow-forwarded-traffic
+
+.\ac-init.ps1 F:\temp3
+6m:23s
+6m:45s
+Test-Connection 10.0.2.4
+2ms
+
+location=northeurope
+#zone1 to zone2
+az vm create -n "ne1-z1-vm" -g "$rg" -l "$location" --image "Win2019Datacenter" --size $vm_size \
+            --authentication-type Password --admin-username "$admin_username" --admin-password "$admin_password" \
+            --public-ip-address "ne1-ze1-pip" --vnet-name "ne1" --subnet "zoned" --no-wait --zone 1
+
+$password = ConvertTo-SecureString 'Microsoft123!' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential ('azadmin', $password)
+New-PSDrive -Name "G" -Root "\\10.0.1.84\c$" -Persist -PSProvider "FileSystem" -Credential $cred
+New-Item -ItemType Directory -Path G: -Name "temp"
+.\ac-init.ps1 G:\temp
+
+3m:2s
+1ms
+
+#zone1 to zone1
+az vm create -n "ne1-z1b-vm" -g "$rg" -l "$location" --image "Win2019Datacenter" --size $vm_size \
+            --authentication-type Password --admin-username "$admin_username" --admin-password "$admin_password" \
+            --public-ip-address "ne1-ze1b-pip" --vnet-name "ne1" --subnet "zoned" --no-wait --zone 1
+
+$password = ConvertTo-SecureString 'Microsoft123!' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential ('azadmin', $password)
+New-PSDrive -Name "H" -Root "\\10.0.1.87\c$" -Persist -PSProvider "FileSystem" -Credential $cred
+New-Item -ItemType Directory -Path H: -Name "temp"
+.\ac-init.ps1 H:\temp
+
+2m:23s
+1ms
+
+#zone1 to zone3
+    az vm create -n "ne1-z2-vm" -g "$rg" -l "$location" --image "Win2019Datacenter" --size $vm_size \
+            --authentication-type Password --admin-username "$admin_username" --admin-password "$admin_password" \
+            --public-ip-address "ne1-ze2-pip" --vnet-name ne1 --subnet zoned --no-wait --zone 2
+
+$password = ConvertTo-SecureString 'Microsoft123!' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential ('azadmin', $password)
+New-PSDrive -Name "I" -Root "\\10.0.1.86\c$" -Persist -PSProvider "FileSystem" -Credential $cred
+New-Item -ItemType Directory -Path I: -Name "temp"
+.\ac-init.ps1 I:\temp
+
+2m:31s
+
+#zone2 to zone3
+    az vm create -n "ne1-z3-vm" -g "$rg" -l "$location" --image "Win2019Datacenter" --size $vm_size \
+            --authentication-type Password --admin-username "$admin_username" --admin-password "$admin_password" \
+            --public-ip-address "ne1-ze3-pip" --vnet-name ne1 --subnet zoned --no-wait --zone 3
+
+$password = ConvertTo-SecureString 'Microsoft123!' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential ('azadmin', $password)
+New-PSDrive -Name "I" -Root "\\10.0.1.86\c$" -Persist -PSProvider "FileSystem" -Credential $cred
+New-Item -ItemType Directory -Path I: -Name "temp2"
+.\ac-init.ps1 I:\temp2
+1ms
+3m:2s
+
+
+#west europe zone tests
+location=westeurope
+
+#zone1 to zone2
+az vm create -n "we1-z1-vm" -g "$rg" -l "$location" --image "Win2019Datacenter" --size $vm_size \
+            --authentication-type Password --admin-username "$admin_username" --admin-password "$admin_password" \
+            --public-ip-address "we1-ze1-pip" --vnet-name "we1" --subnet "zoned" --no-wait --zone 1
+
+set-executionpolicy -scope process unrestricted
+Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+$password = ConvertTo-SecureString 'Microsoft123!' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential ('azadmin', $password)
+New-PSDrive -Name "G" -Root "\\10.0.3.69\c$" -Persist -PSProvider "FileSystem" -Credential $cred
+New-Item -ItemType Directory -Path G: -Name "temp"
+.\ac-init.ps1 G:\temp
+2m:2s
+
+#zone1 to zone1
+az vm create -n "we1-z1b-vm" -g "$rg" -l "$location" --image "Win2019Datacenter" --size $vm_size \
+            --authentication-type Password --admin-username "$admin_username" --admin-password "$admin_password" \
+            --public-ip-address "we1-ze1b-pip" --vnet-name "we1" --subnet "zoned" --no-wait --zone 1
+
+set-executionpolicy -scope process unrestricted
+Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+$password = ConvertTo-SecureString 'Microsoft123!' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential ('azadmin', $password)
+New-PSDrive -Name "J" -Root "\\10.0.3.71\c$" -Persist -PSProvider "FileSystem" -Credential $cred
+New-Item -ItemType Directory -Path J: -Name "temp"
+.\ac-init.ps1 J:\temp
+
+
+
+#zone1 to zone3
+    az vm create -n "we1-z2-vm" -g "$rg" -l "$location" --image "Win2019Datacenter" --size $vm_size \
+            --authentication-type Password --admin-username "$admin_username" --admin-password "$admin_password" \
+            --public-ip-address "we1-ze2-pip" --vnet-name we1 --subnet zoned --no-wait --zone 2
+
+Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+$password = ConvertTo-SecureString 'Microsoft123!' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential ('azadmin', $password)
+New-PSDrive -Name "I" -Root "\\10.0.3.70\c$" -Persist -PSProvider "FileSystem" -Credential $cred
+New-Item -ItemType Directory -Path I: -Name "temp"
+.\ac-init.ps1 I:\temp
+5m:22s
+
+#zone2 to zone3
+    az vm create -n "we1-z3-vm" -g "$rg" -l "$location" --image "Win2019Datacenter" --size $vm_size \
+            --authentication-type Password --admin-username "$admin_username" --admin-password "$admin_password" \
+            --public-ip-address "we1-ze3-pip" --vnet-name we1 --subnet zoned --no-wait --zone 3
+
+Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+$password = ConvertTo-SecureString 'Microsoft123!' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential ('azadmin', $password)
+New-PSDrive -Name "I" -Root "\\10.0.3.70\c$" -Persist -PSProvider "FileSystem" -Credential $cred
+New-Item -ItemType Directory -Path I: -Name "temp2"
+.\ac-init.ps1 I:\temp2
+5m:28s
+
+
+
+
+
+#north Europe to west europe
+$password = ConvertTo-SecureString 'Microsoft123!' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential ('azadmin', $password)
+New-PSDrive -Name "G" -Root "\\10.0.3.4\c$" -Persist -PSProvider "FileSystem" -Credential $cred
+New-Item -ItemType Directory -Path G: -Name "temp"
+.\ac-init.ps1 G:\temp
+36m:49s
+Test-Connection 10.0.3.4
+15ms
+
+#north Europe to UK south
+$password = ConvertTo-SecureString 'Microsoft123!' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential ('azadmin', $password)
+New-PSDrive -Name "H" -Root "\\10.0.4.4\c$" -Persist -PSProvider "FileSystem" -Credential $cred
+New-Item -ItemType Directory -Path H: -Name "temp"
+.\ac-init.ps1 H:\temp
+32m:28s
+Test-Connection 10.0.4.4
+10ms
+
+#north Europe to uk west
+$password = ConvertTo-SecureString 'Microsoft123!' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential ('azadmin', $password)
+New-PSDrive -Name "I" -Root "\\10.0.5.4\c$" -Persist -PSProvider "FileSystem" -Credential $cred
+New-Item -ItemType Directory -Path I: -Name "temp"
+.\ac-init.ps1 I:\temp
+33m:33s
+Test-Connection 10.0.5.4
+10ms
+
+#north Europe to norway east
+$password = ConvertTo-SecureString 'Microsoft123!' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential ('azadmin', $password)
+New-PSDrive -Name "J" -Root "\\10.0.6.4\c$" -Persist -PSProvider "FileSystem" -Credential $cred
+New-Item -ItemType Directory -Path J: -Name "temp"
+.\ac-init.ps1 J:\temp
+50m:11s
+
+38ms
+
+az vm list-ip-addresses -g $rg -o table
+
+#uk south to uk west 4ms
+vnet1=ukw1
+vnet2=uks1
+az network vnet peering create -g $rg -n "${vnet1}-to-${vnet2}" --vnet-name $vnet1 --remote-vnet $vnet2 --allow-vnet-access
+az network vnet peering create -g $rg -n "${vnet2}-to-${vnet1}" --vnet-name $vnet2 --remote-vnet $vnet1 --allow-vnet-access
+
+$password = ConvertTo-SecureString 'Microsoft123!' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential ('azadmin', $password)
+New-PSDrive -Name "K" -Root "\\10.0.5.4\c$" -Persist -PSProvider "FileSystem" -Credential $cred
+New-Item -ItemType Directory -Path K: -Name "temp2"
+.\ac-init.ps1 K:\temp2
+4m:1s
+Test-Connection 10.0.5.4
+1ms
+
+#uk south to west europe 4ms
+vnet1=we1
+vnet2=uks1
+az network vnet peering create -g $rg -n "${vnet1}-to-${vnet2}" --vnet-name $vnet1 --remote-vnet $vnet2 --allow-vnet-access
+az network vnet peering create -g $rg -n "${vnet2}-to-${vnet1}" --vnet-name $vnet2 --remote-vnet $vnet1 --allow-vnet-access
+
+$password = ConvertTo-SecureString 'Microsoft123!' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential ('azadmin', $password)
+New-PSDrive -Name "L" -Root "\\10.0.3.4\c$" -Persist -PSProvider "FileSystem" -Credential $cred
+New-Item -ItemType Directory -Path L: -Name "temp2"
+.\ac-init.ps1 L:\temp2
+29m:34s
+Test-Connection 10.0.3.4
+10ms
+
+#LB
+create_vm_vnet westeurope we1 10.0.1.0/24 10.0.1.0/26
+create_vm_vnet westeurope we2 10.0.2.0/24 10.0.2.0/26
+vnet1=we1
+vnet2=we2
+sleep 5
+az network vnet peering create -g $rg -n "${vnet1}-to-${vnet2}" --vnet-name $vnet1 --remote-vnet $vnet2 --allow-vnet-access
+az network vnet peering create -g $rg -n "${vnet2}-to-${vnet1}" --vnet-name $vnet2 --remote-vnet $vnet1 --allow-vnet-access
+
+set-executionpolicy -scope process unrestricted
+Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+$password = ConvertTo-SecureString 'Microsoft123!' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential ('azadmin', $password)
+New-PSDrive -Name "G" -Root "\\10.0.1.4\c$" -Persist -PSProvider "FileSystem" -Credential $cred
+New-Item -ItemType Directory -Path G: -Name "temp"
+.\ac-init.ps1 G:\temp
+
+V2V
+2m:23s
+
+V2LB2V
+
+New-PSDrive -Name "H" -Root "\\10.0.1.5\c$" -Persist -PSProvider "FileSystem" -Credential $cred
+New-Item -ItemType Directory -Path H: -Name "temp2"
+.\ac-init.ps1 H:\temp2
+
+2m:17s

@@ -1,0 +1,79 @@
+log syslog all;
+router id 10.1.1.5;
+protocol device {
+      scan time 10;
+}
+protocol direct {
+      disabled;
+}
+protocol kernel {
+      export where source != RTS_STATIC;
+}
+protocol static {
+      route 10.1.0.4/32 via 10.1.1.1; #RS1
+      route 10.1.0.5/32 via 10.1.1.1; #RS2
+	  route 10.2.1.4/32 via 10.1.1.1;
+	  route 10.2.1.5/32 via 10.1.1.1;      
+      route 12.12.12.12/32 via 10.1.1.1;  # Test route      
+      route 10.1.0.0/16 via 10.1.1.1; #hub1 spoke summary
+}
+template bgp PEERS {
+      local as 65001; #HUB1 NVA ASN
+      multihop;
+}
+filter TO_RS {
+      # Accept test route
+      if (net = 12.12.12.12/32) then { accept; }
+      # Drop other long prefixes (see /32 in static routes)
+      if ( net ~ [ 0.0.0.0/0{30,32} ] ) then { reject; }
+      # Optionally set next hop for hub prefix as the LB
+      if (net = 10.1.0.0/16) then
+      {
+            bgp_next_hop = 10.1.1.6; #next hop IP is LB
+            accept;
+      }
+	  if (net = 10.2.0.0/16) then
+      {
+            bgp_next_hop = 10.1.1.6; #next hop IP is LB
+            accept;
+      }
+      # Accept everything else
+      else {
+            bgp_path.delete(65515);  # In case routes from a VNG arrive here
+            accept;
+      }
+}
+filter TO_NVA {
+      # Accept test route
+      if (net = 22.22.22.22/32) then { accept; }
+      # Drop other long prefixes (see /32 in static routes)
+      if ( net ~ [ 0.0.0.0/0{30,32} ] ) then { reject; }
+	  if (net = 10.1.16.0/24) then { reject; }
+	  if (net = 10.1.17.0/24) then { reject; }
+      # Accept everything else
+      else { accept; }
+}
+protocol bgp rs0 from PEERS {
+      description "RouteServer instance 0";
+      neighbor 10.1.0.4 as 65515;
+      import all;
+      export filter TO_RS;
+}
+protocol bgp rs1 from PEERS {
+      description "RouteServer instance 1";
+      neighbor 10.1.0.5 as 65515;
+      import all;
+      export filter TO_RS;
+}
+protocol bgp hub2nva1 from PEERS {
+      description "Hub 2 NVA1";      
+      neighbor 10.2.1.4 as 65002;
+      import all;
+      export filter TO_NVA;
+}
+protocol bgp hub2nva2 from PEERS {
+      description "Hub 2 NVA1";
+      neighbor 10.2.1.5 as 65002;
+      import all;
+      export filter TO_NVA;
+}

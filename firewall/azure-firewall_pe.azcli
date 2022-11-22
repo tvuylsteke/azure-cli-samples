@@ -19,21 +19,21 @@ clientRT=clientsRT
 clientVM=clientvm
 clientVM_PIP=clientvm-pip
 
-location=westeurope
+location=northeurope
 vm_size=Standard_B1s
 
 #Resource Group
-az group create -n $rg -l westeurope
+az group create -n $rg -l $location
 
 #WE VNET
-az network vnet create -g $rg -n $vnet --address-prefix 10.1.0.0/16 --subnet-name $serversubnet --subnet-prefix 10.1.0.0/24 -l westeurope
+az network vnet create -g $rg -n $vnet --address-prefix 10.1.0.0/16 --subnet-name $serversubnet --subnet-prefix 10.1.0.0/24 -l $location
 az network vnet subnet create -g $rg -n $azfwsubnet --vnet-name $vnet --address-prefix 10.1.1.0/24
 az network vnet subnet create -g $rg -n $clientsubnet --vnet-name $vnet --address-prefix 10.1.2.0/24
 
 #Azure Firewall
 #https://github.com/Azure/azure-cli-extensions/tree/master/src/azure-firewall
 az extension add -n azure-firewall
-az network firewall create --name $fwName --resource-group $rg -l westeurope
+az network firewall create --name $fwName --resource-group $rg -l $location
 az network public-ip create -g $rg -n "$fwName-pip"  --allocation-method Static --sku Standard
 az network firewall ip-config create -f $fwName -n ipconfig --public-ip-address "$fwName-pip" -g $rg --vnet-name $vnet
 
@@ -74,7 +74,7 @@ az network firewall network-rule create \
    --action Allow
 
 #Server Route table
-az network route-table create -g $rg -n $serverRT -l westeurope
+az network route-table create -g $rg -n $serverRT -l $location
 #az network route-table route create -n toInternet -g $rg --route-table-name $serverRT --address-prefix 10.1.2.0/24  --next-hop-type VirtualAppliance  --next-hop-ip-address $azfw_private_ip
 az network route-table route create -n toInternet -g $rg --route-table-name $serverRT --address-prefix 0.0.0.0/0  --next-hop-type VirtualAppliance  --next-hop-ip-address $azfw_private_ip
 #avoid SSH being broken for "my" client
@@ -83,22 +83,22 @@ az network route-table route create -n clientIP --route-table-name $serverRT -g 
 az network vnet subnet update --vnet-name $vnet -n $serversubnet -g $rg  --route-table $serverRT
 
 #Client Route table
-az network route-table create -g $rg -n $clientRT -l westeurope
-az network route-table route create -n toInternet -g $rg --route-table-name $clientRT --address-prefix 10.1.0.0/24  --next-hop-type VirtualAppliance  --next-hop-ip-address $azfw_private_ip
+az network route-table create -g $rg -n $clientRT -l $location
+az network route-table route create -n toInternet -g $rg --route-table-name $clientRT --address-prefix 0.0.0.0/0  --next-hop-type VirtualAppliance  --next-hop-ip-address $azfw_private_ip
 #avoid SSH being broken for "my" client
 my_ip=$(curl -s4 ifconfig.co)
-az network route-table route create -n clientIP --route-table-name $serverRT -g $rg --next-hop-type Internet --address-prefix "$my_ip/32"
+az network route-table route create -n clientIP --route-table-name $clientRT -g $rg --next-hop-type Internet --address-prefix "$my_ip/32"
 
 az network vnet subnet update --vnet-name $vnet -n $clientsubnet -g $rg  --route-table $clientRT
 
 #test VMs
-az vm create --image ubuntults -g $rg -n $serverVM --admin-password $admin_password --admin-username $admin_user -l westeurope --public-ip-address $serverVM_PIP --vnet-name $vnet --subnet $serversubnet --os-disk-size 30 --storage-sku Standard_LRS --no-wait
-az vm create --image ubuntults -g $rg -n $clientVM --admin-password $admin_password --admin-username $admin_user -l westeurope --public-ip-address $clientVM_PIP --vnet-name $vnet --subnet $clientsubnet --os-disk-size 30 --storage-sku Standard_LRS --no-wait
+az vm create --image ubuntults -g $rg -n $serverVM --admin-password $admin_password --admin-username $admin_user -l $location --public-ip-address $serverVM_PIP --vnet-name $vnet --subnet $serversubnet --os-disk-size 30 --storage-sku Standard_LRS --no-wait
+az vm create --image ubuntults -g $rg -n $clientVM --admin-password $admin_password --admin-username $admin_user -l $location --public-ip-address $clientVM_PIP --vnet-name $vnet --subnet $clientsubnet --os-disk-size 30 --storage-sku Standard_LRS --no-wait
 
 
 subnet=exception
 az network vnet subnet create -g $rg -n $subnet --vnet-name $vnet --address-prefix 10.1.3.0/24
-az vm create --image ubuntults -g $rg -n excvm --admin-password $admin_password --admin-username $admin_user -l westeurope --public-ip-address excvm-pip --vnet-name $vnet --subnet $subnet --os-disk-size 30 --storage-sku Standard_LRS --no-wait
+az vm create --image ubuntults -g $rg -n excvm --admin-password $admin_password --admin-username $admin_user -l $location --public-ip-address excvm-pip --vnet-name $vnet --subnet $subnet --os-disk-size 30 --storage-sku Standard_LRS --no-wait
 
 
 # Create cloudinit file:

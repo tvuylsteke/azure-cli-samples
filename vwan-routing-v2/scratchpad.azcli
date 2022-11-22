@@ -1,99 +1,274 @@
-#
-#
-#  VWAN + 2 hubs + 3 VNETS on each
-#
-#
 subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
+admin_password=Microsoft123!
+admin_user=azadmin
+rg=sentinel
+loc="northeurope"
+
 #select subscription
 az account set --subscription "$subscription"
-# depedencies
-#VWAN
-az extension add --name virtual-wan
 
-#variables
-rg=az-vwan-routing5
-loc="westcentralus"
-admin_password=$(az keyvault secret show --id https://setspnvault.vault.azure.net/secrets/local-vm-password/efcdc715a1de4dca90806409730fb638 --query 'value' -o tsv)
-admin_user=azadmin
-
-# Resource Group
+#Resource Group
 az group create -n $rg -l $loc
 
-################################
-## VWAN Config
-################################
-vwan=vwan-routing-lab
-az network vwan create -n $vwan -g $rg -l $loc
-loc1="westcentralus"
-loc2="centralus"
+#HUB VNET
+vnet=hub-vnet
+subnet=servers
+az network vnet create -g $rg -n $vnet --address-prefix 10.0.0.0/16 --subnet-name $subnet --subnet-prefix 10.0.0.0/24 -l $loc
+subnet=AzureFirewallSubnet
+az network vnet subnet create -g $rg -n $subnet --vnet-name $vnet --address-prefix 10.0.1.0/24
+subnet=endpoints
+az network vnet subnet create -g $rg -n $subnet --vnet-name $vnet --address-prefix 10.0.2.0/24
+subnet=nva
+az network vnet subnet create -g $rg -n $subnet --vnet-name $vnet --address-prefix 10.0.3.0/24
 
-## VWAN WE-HUB
-az network vhub create -n we-hub --address-prefix 192.168.1.0/24 -g $rg --vwan $vwan -l $loc1
+az network vnet subnet update --name endpoints -g $rg --vnet-name hub-vnet --disable-private-endpoint-network-policies false
 
-## VWAN NE-HUB
-az network vhub create -n ne-hub --address-prefix 192.168.2.0/24 -g $rg --vwan $vwan -l $loc2
+#az extension add -n azure-firewall
+fwName=azfw
+az network firewall create --name $fwName --resource-group $rg -l $loc
+az network public-ip create -g $rg -n "$fwName-pip"  --allocation-method Static --sku Standard
+az network firewall ip-config create -f $fwName -n ipconfig --public-ip-address "$fwName-pip" -g $rg --vnet-name hub-vnet
 
-################################
-## VNETs connected to VWAN hubs
-################################
-vwanhub1=we-hub
-vnet1=we-spoke-vnet-01
-subnet1range=10.1.1.0/24
-subnet1serversrange=10.1.1.0/25
+logws_name=log$RANDOM
+azfw_id=$(az network firewall show -n $fwName -g $rg -o tsv --query id)
+az monitor log-analytics workspace create -n $logws_name -g $rg
+logws_id=$(az resource list -g $rg -n $logws_name --query '[].id' -o tsv)
+az monitor diagnostic-settings create -n mydiag --resource $azfw_id --workspace $logws_id \
+    --metrics '[{"category": "AllMetrics", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false }, "timeGrain": null}]' \
+    --logs '[{"category": "AzureFirewallApplicationRule", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false}}, 
+            {"category": "AzureFirewallNetworkRule", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false}}, 
+            {"category": "AzureFirewallDnsProxy", "enabled": true, "retentionPolicy": {"days": 0, "enabled": false}}]' >/dev/null
+az network firewall update -n $fwName -g $rg
 
-vwanhub2=we-hub
-vnet2=we-spoke-vnet-02
-subnet2range=10.1.2.0/24
-subnet2serversrange=10.1.2.0/25
+az network firewall policy create --n fw-policy -g $rg
+az network firewall policy rule-collection-group create --name allowAll --policy-name fw-policy --priority 100 -g $rg
+#az network firewall policy rule-collection-group collection rule add --collection-name rule-col --name rule1 -g $rg --rule-collection-group-name allowAll \
+    #--rule-type NetworkRule
 
-vwanhub3=we-hub
-vnet3=we-spoke-vnet-03
-subnet3range=10.1.3.0/24
-subnet3serversrange=10.1.3.0/25
+az vm create --image ubuntults -g $rg -n hubvm --generate-ssh-keys --admin-username $admin_user -l $loc --public-ip-address hubvm-pip --vnet-name hub-vnet --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --no-wait
 
-vwanhub4=we-hub
-vnet4=we-spoke-vnet-04
-subnet4range=10.1.4.0/24
-subnet4serversrange=10.1.4.0/25
+#SPOKE1 VNET
+vnet=spoke1-vnet
+subnet=servers
+az network vnet create -g $rg -n $vnet --address-prefix 10.1.0.0/16 --subnet-name $subnet --subnet-prefix 10.1.0.0/24 -l $loc
+subnet=endpoints
+az network vnet subnet create -g $rg -n $subnet --vnet-name $vnet --address-prefix 10.1.1.0/24
+#az network vnet subnet update --name endpoints -g $rg --vnet-name spoke1-vnet --disable-private-endpoint-network-policies true
 
-vwanhub5=ne-hub
-vnet5=ne-spoke-vnet-01
-subnet5range=10.2.1.0/24
-subnet5serversrange=10.2.1.0/25
+az network vnet peering create -g $rg -n hubToSpoke1 --vnet-name hub-vnet --remote-vnet spoke1-vnet --allow-vnet-access
+az network vnet peering create -g $rg -n spoke1ToHub --vnet-name spoke1-vnet --remote-vnet hub-vnet --allow-forwarded-traffic --allow-vnet-access
 
-vwanhub6=ne-hub
-vnet6=ne-spoke-vnet-01
-subnet6range=10.2.2.0/24
-subnet6serversrange=10.2.2.0/25
+az vm create --image ubuntults -g $rg -n spoke1vm --generate-ssh-keys --admin-username $admin_user -l $loc --public-ip-address spoke1vm-pip --vnet-name spoke1-vnet --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --no-wait
 
-vwanhub7=ne-hub
-vnet7=ne-spoke-vnet-01
-subnet7range=10.2.3.0/24
-subnet7serversrange=10.2.3.0/25
+#SPOKE2 VNET
+vnet=spoke2-vnet
+subnet=servers
+az network vnet create -g $rg -n $vnet --address-prefix 10.2.0.0/16 --subnet-name $subnet --subnet-prefix 10.2.0.0/24 -l $loc
+subnet=endpoints
+az network vnet subnet create -g $rg -n $subnet --vnet-name $vnet --address-prefix 10.2.1.0/24
+#az network vnet subnet update --name endpoints -g $rg --vnet-name spoke2-vnet --disable-private-endpoint-network-policies true
 
-vwanhub8=ne-hub
-vnet8=ne-spoke-vnet-01
-subnet8range=10.2.3.0/24
-subnet8serversrange=10.2.3.0/25
+az network vnet peering create -g $rg -n hubToSpoke2 --vnet-name hub-vnet --remote-vnet spoke2-vnet --allow-vnet-access
+az network vnet peering create -g $rg -n spoke2ToHub --vnet-name spoke2-vnet --remote-vnet hub-vnet --allow-forwarded-traffic --allow-vnet-access
 
-for i in {1..8}
-do
-    vwanhub=vwanhub$i
-    vnet=vnet$i
-    subnetrange=subnet$i\range
-    subnetserversrange=subnet$i\serversrange
-    echo ${!vwanhub}
-    echo ${!vnet}
-    echo ${!subnetrange}
-    echo ${!subnetserversrange}
+az vm create --image ubuntults -g $rg -n spoke2vm --generate-ssh-keys --admin-username $admin_user -l $loc --public-ip-address spoke2vm-pip --vnet-name spoke2-vnet --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --no-wait
 
-    az network vnet create -n "${!vnet}" --address-prefix ${!subnetrange} --subnet-prefix ${!subnetserversrange} --subnet-name servers -l $loc -g $rg
-    ### Test VMs
-    az vm create -n "${!vnet}-vm" --public-ip-address "${!vnet}-vm-pip" --vnet-name ${!vnet} --image ubuntults -g $rg --generate-ssh-keys --admin-username $admin_user -l $loc --subnet servers --os-disk-size 30 --storage-sku Standard_LRS --size Standard_B1s #--no-wait
-    pip=$(az network public-ip show -n "${!vnet}-vm-pip" -g $rg --query ipAddress -o tsv)
-    ssh-keyscan -H $pip >> ~/.ssh/known_hosts
+#Route table
+rt=spoke1RT
+az network route-table create  -g $rg -n $rt -l $loc
+az network route-table route create -n toSpoke2 -g $rg --route-table-name $rt --address-prefix 10.2.0.0/16  --next-hop-type VirtualAppliance  --next-hop-ip-address 10.0.1.4
+az network vnet subnet update --vnet-name spoke1-vnet -n servers -g $rg  --route-table $rt
 
-    ###   Connect WE hub and Spokes  
-    vnetId=$(az network vnet show --resource-group $rg --name "${!vnet}" --query id --out tsv)
-    az network vhub connection create -n "${!vnet}" --remote-vnet $vnetId -g $rg --vhub-name ${!vwanhub}"
-done
+#Route table
+rt=spoke2RT
+az network route-table create  -g $rg -n $rt -l $loc
+az network route-table route create -n toSpoke1 -g $rg --route-table-name $rt --address-prefix 10.1.0.0/16  --next-hop-type VirtualAppliance  --next-hop-ip-address 10.0.1.4
+az network vnet subnet update --vnet-name spoke2-vnet -n servers -g $rg  --route-table $rt
+
+
+vm_size=Standard_B2ms
+offer=WindowsServer
+publisher=MicrosoftWindowsServer
+sku=2022-datacenter-azure-edition
+version=latest
+
+# az vm image list -f WindowsServer -s 2022-datacenter-azure-edition --all
+#https://github.com/Azure/azure-rest-api-specs/blob/master/arm-compute/quickstart-templates/aliases.json
+
+az vm create -n "dc-vm" -g $rg -l $loc --image $publisher:$offer:$sku:$version --size $vm_size \
+            --authentication-type Password --admin-username "$admin_username" --admin-password "$admin_password" \
+            --public-ip-address "dc-vm-pip" --vnet-name "spoke1-vnet" --subnet "servers" --no-wait
+
+az vm create -n "srv2-vm" -g $rg -l $loc --image $publisher:$offer:$sku:$version --size $vm_size \
+            --authentication-type Password --admin-username "$admin_username" --admin-password "$admin_password" \
+            --public-ip-address "srv-vm2-pip" --vnet-name "spoke2-vnet" --subnet "servers" --no-wait
+
+#Private DNS Zone
+zoneName="privatelink.blob.core.windows.net"
+az network private-dns zone create -g $rg --name  $zoneName
+az network private-dns link vnet create -g $rg --zone-name  $zoneName --name hublink --virtual-network hub-vnet --registration-enabled false 
+az network private-dns link vnet create -g $rg --zone-name  $zoneName --name spoke1link --virtual-network spoke1-vnet --registration-enabled false 
+az network private-dns link vnet create -g $rg --zone-name  $zoneName --name spoke2link --virtual-network spoke2-vnet --registration-enabled false 
+
+#Storage Account
+#hub
+storage_account_name=hubep83748
+az storage account create -n $storage_account_name -g $rg -l $loc --sku Standard_LRS
+id=$(az storage account show -n $storage_account_name -g $rg --query id -o tsv)
+storage_container_name=test
+storage_blob_name=test.txt
+storage_account_key=$(az storage account keys list -n $storage_account_name -g $rg --query '[0].value' -o tsv)
+az storage container create -n $storage_container_name --public-access container \
+    --auth-mode key --account-name $storage_account_name --account-key $storage_account_key
+echo "Hello world!" >"/tmp/${storage_blob_name}"
+az storage blob upload -n "$storage_blob_name" -c "$storage_container_name" -f "/tmp/${storage_blob_name}" \
+    --auth-mode key --account-name "$storage_account_name" --account-key "${storage_account_key}"
+#az network private-endpoint create -g $rg -n MyPE --vnet-name hub-vnet --subnet endpoints --private-connection-resource-id $id --connection-name hubep83748 -l $loc --group-ids blob
+
+storage_endpoint_name=storageep
+az deployment group create -n storep -g $rg --template-file ./private_endpoint_UDR_template.json \
+  --parameters "{ \"privateEndpointName\": { \"value\": \"${storage_endpoint_name}\" }, \"subnetId\": { \"value\": \"${sql_subnet_id}\" }, \"privateLinkResourceId\": { \"value\": \"${id}\" }, \"privateLinkResourceGroupId\": { \"value\": \"blob\" } }"
+storage_nic_id=$(az network private-endpoint show -n $storage_endpoint_name -g $rg --query 'networkInterfaces[0].id' -o tsv)
+storage_endpoint_ip=$(az network nic show --ids $storage_nic_id --query 'ipConfigurations[0].privateIpAddress' -o tsv)
+echo "Private IP address for Storage Account ${storage_account_name}: ${storage_endpoint_ip}"
+
+dns_zone_name=privatelink.blob.core.windows.net
+# Linking private endpoint with DNS zone to automatically create the A record
+az network private-endpoint dns-zone-group create --endpoint-name $storage_endpoint_name -g $rg -n myzonegroup --zone-name zone1 --private-dns-zone $dns_zone_name
+#az network private-endpoint dns-zone-group create -g $rg --endpoint-name MyPE --name MyZoneGroup --private-dns-zone $zoneName --zone-name blob
+
+#spoke1
+storage_account_name=spoke1ep83748
+az storage account create -n $storage_account_name -g $rg -l $loc --sku Standard_LRS
+id=$(az storage account show -n $storage_account_name -g $rg --query id -o tsv)
+storage_container_name=test
+storage_blob_name=test.txt
+storage_account_key=$(az storage account keys list -n $storage_account_name -g $rg --query '[0].value' -o tsv)
+az storage container create -n $storage_container_name --public-access container \
+    --auth-mode key --account-name $storage_account_name --account-key $storage_account_key
+echo "Hello world!" >"/tmp/${storage_blob_name}"
+az storage blob upload -n "$storage_blob_name" -c "$storage_container_name" -f "/tmp/${storage_blob_name}" \
+    --auth-mode key --account-name "$storage_account_name" --account-key "${storage_account_key}"
+#az network private-endpoint create -g $rg -n MyPE --vnet-name hub-vnet --subnet endpoints --private-connection-resource-id $id --connection-name hubep83748 -l $loc --group-ids blob
+
+storage_endpoint_name=storageepspoke1
+sql_subnet_id=$(az network vnet subnet show -n endpoints --vnet-name spoke1-vnet -g $rg --query id -o tsv) && echo $sql_subnet_id
+az deployment group create -n storep -g $rg --template-file ./private_endpoint_UDR_template.json \
+  --parameters "{ \"privateEndpointName\": { \"value\": \"${storage_endpoint_name}\" }, \"subnetId\": { \"value\": \"${sql_subnet_id}\" }, \"privateLinkResourceId\": { \"value\": \"${id}\" }, \"privateLinkResourceGroupId\": { \"value\": \"blob\" } }"
+storage_nic_id=$(az network private-endpoint show -n $storage_endpoint_name -g $rg --query 'networkInterfaces[0].id' -o tsv)
+storage_endpoint_ip=$(az network nic show --ids $storage_nic_id --query 'ipConfigurations[0].privateIpAddress' -o tsv)
+echo "Private IP address for Storage Account ${storage_account_name}: ${storage_endpoint_ip}"
+
+dns_zone_name=privatelink.blob.core.windows.net
+# Linking private endpoint with DNS zone to automatically create the A record
+az network private-endpoint dns-zone-group create --endpoint-name $storage_endpoint_name -g $rg -n myzonegroup --zone-name zone1 --private-dns-zone $dns_zone_name
+#az network private-endpoint dns-zone-group delete --endpoint-name $storage_endpoint_name -g $rg -n myzonegroup
+
+
+#spoke2
+storage_account_name=spoke2ep83748
+az storage account create -n $storage_account_name -g $rg -l $loc --sku Standard_LRS
+id=$(az storage account show -n $storage_account_name -g $rg --query id -o tsv)
+storage_container_name=test
+storage_blob_name=test.txt
+storage_account_key=$(az storage account keys list -n $storage_account_name -g $rg --query '[0].value' -o tsv)
+az storage container create -n $storage_container_name --public-access container \
+    --auth-mode key --account-name $storage_account_name --account-key $storage_account_key
+echo "Hello world!" >"/tmp/${storage_blob_name}"
+az storage blob upload -n "$storage_blob_name" -c "$storage_container_name" -f "/tmp/${storage_blob_name}" \
+    --auth-mode key --account-name "$storage_account_name" --account-key "${storage_account_key}"
+#az network private-endpoint create -g $rg -n MyPE --vnet-name hub-vnet --subnet endpoints --private-connection-resource-id $id --connection-name hubep83748 -l $loc --group-ids blob
+
+storage_endpoint_name=storageepspoke2
+sql_subnet_id=$(az network vnet subnet show -n endpoints --vnet-name spoke2-vnet -g $rg --query id -o tsv) && echo $sql_subnet_id
+az deployment group create -n storep -g $rg --template-file ./private_endpoint_UDR_template.json \
+  --parameters "{ \"privateEndpointName\": { \"value\": \"${storage_endpoint_name}\" }, \"subnetId\": { \"value\": \"${sql_subnet_id}\" }, \"privateLinkResourceId\": { \"value\": \"${id}\" }, \"privateLinkResourceGroupId\": { \"value\": \"blob\" } }"
+storage_nic_id=$(az network private-endpoint show -n $storage_endpoint_name -g $rg --query 'networkInterfaces[0].id' -o tsv)
+storage_endpoint_ip=$(az network nic show --ids $storage_nic_id --query 'ipConfigurations[0].privateIpAddress' -o tsv)
+echo "Private IP address for Storage Account ${storage_account_name}: ${storage_endpoint_ip}"
+
+storage_endpoint_name=fileepspoke2
+id=$(az storage account show -n $storage_account_name -g $rg --query id -o tsv)
+sql_subnet_id=$(az network vnet subnet show -n endpoints --vnet-name spoke2-vnet -g $rg --query id -o tsv) && echo $sql_subnet_id
+az deployment group create -n storep -g $rg --template-file ./private_endpoint_UDR_template.json \
+  --parameters "{ \"privateEndpointName\": { \"value\": \"${storage_endpoint_name}\" }, \"subnetId\": { \"value\": \"${sql_subnet_id}\" }, \"privateLinkResourceId\": { \"value\": \"${id}\" }, \"privateLinkResourceGroupId\": { \"value\": \"file\" } }"
+storage_nic_id=$(az network private-endpoint show -n $storage_endpoint_name -g $rg --query 'networkInterfaces[0].id' -o tsv)
+storage_endpoint_ip=$(az network nic show --ids $storage_nic_id --query 'ipConfigurations[0].privateIpAddress' -o tsv)
+echo "Private IP address for Storage Account ${storage_account_name}: ${storage_endpoint_ip}"
+
+
+dns_zone_name=privatelink.blob.core.windows.net
+# Linking private endpoint with DNS zone to automatically create the A record
+az network private-endpoint dns-zone-group create --endpoint-name $storage_endpoint_name -g $rg -n myzonegroup --zone-name zone1 --private-dns-zone $dns_zone_name
+#az network private-endpoint dns-zone-group delete --endpoint-name $storage_endpoint_name -g $rg -n myzonegroup
+
+curl -s https://${storage_account_name}.blob.core.windows.net/test/test.txt
+curl -s https://spoke2ep83748.blob.core.windows.net/test/test.txt
+
+#SQL
+sql_server_name=myserver$RANDOM
+# sql_server_name=$(az sql server list -g $rg --query '[0].name' -o tsv)  # For an already existing server
+sql_db_name=mydb
+sql_username=azure
+sql_password=Microsoft123!
+az sql server create -n $sql_server_name -g $rg -l $loc --admin-user $sql_username --admin-password $sql_password
+az sql db create -n $sql_db_name -s $sql_server_name -g $rg -e Basic -c 5 --no-wait
+# Optionally configure database as serverless SKU
+# az sql db update -g $rg -s $sql_server_name -n $sql_db_name --edition GeneralPurpose --min-capacity 1 --capacity 4 --family Gen5 --compute-model Serverless --auto-pause-delay 1440
+sql_server_fqdn=$(az sql server show -n $sql_server_name -g $rg -o tsv --query fullyQualifiedDomainName)
+
+sql_endpoint_name=sqlep
+sql_server_id=$(az sql server show -n $sql_server_name -g $rg -o tsv --query id)
+sql_subnet_id=$(az network vnet subnet show -n endpoints --vnet-name spoke2-vnet -g $rg --query id -o tsv) && echo $sql_subnet_id
+#az network private-endpoint create -n $sql_endpoint_name -g $rg --vnet-name $vnet_name --subnet $subnet_sql_name --private-connection-resource-id $sql_server_id --group-id sqlServer --connection-name sqlConnection
+az deployment group create -n sqlendpoint -g $rg --template-file private_endpoint_UDR_template.json \
+  --parameters "{ \"privateEndpointName\": { \"value\": \"${sql_endpoint_name}\" }, \"subnetId\": { \"value\": \"${sql_subnet_id}\" }, \"privateLinkResourceId\": { \"value\": \"${sql_server_id}\" }, \"privateLinkResourceGroupId\": { \"value\": \"sqlServer\" } }"
+sql_nic_id=$(az network private-endpoint show -n $sql_endpoint_name -g $rg --query 'networkInterfaces[0].id' -o tsv)
+sql_endpoint_ip=$(az network nic show --ids $sql_nic_id --query 'ipConfigurations[0].privateIpAddress' -o tsv)
+echo "Private IP address for SQL server ${sql_server_name}: ${sql_endpoint_ip}"
+
+zoneName="privatelink.database.windows.net"
+az network private-dns zone create -g $rg --name  $zoneName
+az network private-dns link vnet create -g $rg --zone-name  $zoneName --name hublink --virtual-network hub-vnet --registration-enabled false 
+az network private-dns link vnet create -g $rg --zone-name  $zoneName --name spoke1link --virtual-network spoke1-vnet --registration-enabled false 
+az network private-dns link vnet create -g $rg --zone-name  $zoneName --name spoke2link --virtual-network spoke2-vnet --registration-enabled false 
+
+az network private-endpoint dns-zone-group create --endpoint-name $sql_endpoint_name -g $rg -n myzonegroup --zone-name zone1 --private-dns-zone $zoneName
+
+#az network private-endpoint dns-zone-group delete -g $rg --endpoint-name $sql_endpoint_name -n myzonegroup
+
+#install sql cmd
+sudo su
+curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add -
+curl https://packages.microsoft.com/config/ubuntu/16.04/prod.list > /etc/apt/sources.list.d/mssql-release.list
+exit
+sudo apt-get update
+sudo ACCEPT_EULA=Y apt-get install msodbcsql17 mssql-tools
+# split here
+echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bash_profile
+echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bashrc
+source ~/.bashrc
+sudo apt-get install unixodbc-dev
+
+sqlcmd -S myserver11370.database.windows.net -U azure -P Microsoft123! -Q "SELECT @@VERSION"
+sqlcmd -S myserver11370.database.windows.net -U azure -P Microsoft123! -Q "select CONNECTIONPROPERTY('client_net_address') AS client_net_address"
+
+
+#Hub Route table
+rt=hubRT
+az network route-table create -g $rg -n $rt -l $loc
+az network route-table route create -n toEndpoints -g $rg --route-table-name $rt --address-prefix  10.0.2.0/24 --next-hop-type VirtualAppliance  --next-hop-ip-address 10.0.1.4
+az network vnet subnet update --vnet-name hub-vnet -n servers -g $rg  --route-table $rt
+
+#linux NVA
+
+az vm create --image ubuntults -g $rg -n nvavm --generate-ssh-keys --admin-username $admin_user -l $loc --public-ip-address nvavm-pip --vnet-name hub-vnet --subnet nva --os-disk-size 30 --storage-sku Standard_LRS --no-wait
+nva_nic_id=$(az vm show -n nvavm -g $rg --query 'networkProfile.networkInterfaces[0].id' -o tsv)
+az network nic update --ids $nva_nic_id --ip-forwarding true
+nva_pip_ip=$(az network public-ip show -n nvavm-pip -g $rg --query ipAddress -o tsv)
+ssh-keyscan -H $nva_pip_ip >> ~/.ssh/known_hosts
+echo "You can SSH to $nva_pip_ip"
+ssh $nva_pip_ip "sudo sysctl -w net.ipv4.ip_forward=1"
+nva_private_ip=$(az network nic show --ids $nva_nic_id --query 'ipConfigurations[0].privateIpAddress' -o tsv)
+echo "NVA provisioned with private IP $nva_private_ip"
+

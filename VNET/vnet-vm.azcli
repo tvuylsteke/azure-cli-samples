@@ -1,4 +1,4 @@
-subscription="Azure CXP FTA Internal Subscription BAGWYTH"
+subscription="Azure CXP FTA Internal Subscription THOVUY SETSPN"
 #select subscription
 az account set --subscription "$subscription"
 
@@ -13,7 +13,7 @@ sku=16_12-byol
 version=$(az vm image list -p $publisher -f $offer -s $sku --all --query '[0].version' -o tsv)
 az vm image terms accept --urn ${publisher}:${offer}:${sku}:${version}
 
-admin_username=vmuser
+admin_username=azadmin
 admin_password=Microsoft123!
 
 # Create a list of Vnets and a VM in each
@@ -60,7 +60,7 @@ function create_branch_csr_vnet {
 az group create -n $rg -l westeurope
 
 #objective 1
-create_vm_vnet westeurope prod11 10.1.1.0/24 10.1.1.0/26
+create_vm_vnet westeurope vnet1 10.10.0.0/16 10.10.1.0/24
 create_vm_vnet westeurope prod12 10.1.2.0/24 10.1.2.0/26
 create_vm_vnet westeurope prod21 10.2.1.0/24 10.2.1.0/26
 create_vm_vnet westeurope prod22 10.2.2.0/24 10.2.2.0/26
@@ -80,3 +80,13 @@ create_vm_vnet westeurope ispoke15 10.1.5.0/24 10.1.5.0/26
 create_vm_vnet westeurope ispoke16 10.1.6.0/24 10.1.6.0/26
 create_vm_vnet westeurope ispoke25 10.2.5.0/24 10.2.5.0/26
 create_vm_vnet westeurope ispoke26 10.2.6.0/24 10.2.6.0/26
+
+
+#additional VM
+
+az vm create -n vnetvnet1-vm2 -g $rg -l westeurope --image "ubuntuLTS" --size $vm_size --authentication-type Password --admin-username "$admin_username" --admin-password "$admin_password" \
+    --public-ip-address "vnetvnet1-pip2" --vnet-name vnetvnet1-westeurope --subnet vm --no-wait
+
+
+az vm create -n vnetvnet2-vm2 -g $rg -l westeurope --image "ubuntuLTS" --size $vm_size --authentication-type Password --admin-username "$admin_username" --admin-password "$admin_password" \
+    --public-ip-address "vnetvnet2-pip2b" --vnet-name vnetvnet2-westeurope --subnet vm --no-wait

@@ -1,0 +1,59 @@
+# az vm image list -f WindowsServer -s 2022-datacenter-azure-edition --all
+#https://github.com/Azure/azure-rest-api-specs/blob/master/arm-compute/quickstart-templates/aliases.json
+
+#Server 20222
+offer=WindowsServer
+publisher=MicrosoftWindowsServer
+sku=2022-datacenter-azure-edition
+version=latest
+
+#Windows 10
+offer=Windows-10
+publisher=MicrosoftWindowsDesktop
+sku=win10-21h2-pro-g2
+version=latest
+
+#Windows 10 + O365
+offer=office-365
+publisher=microsoftwindowsdesktop
+sku=win10-21h2-avd-m365-g2
+version=latest
+
+#Windows 11
+offer=Windows-11
+publisher=microsoftwindowsdesktop
+sku=win11-21h2-pro
+version=latest
+
+#create VM in new VNET
+az vm create -n "ftp-vm" -g $rg -l $loc --image $publisher:$offer:$sku:$version --size $vm_size \
+            --authentication-type Password --admin-username "$admin_username" --admin-password "$admin_password" \
+            --public-ip-address "ftp-vm-pip" --vnet-name "ftp-vnet" --subnet "servers" --vnet-address-prefix "10.1.1.0/24" --subnet-address-prefix "10.1.1.0/25" --no-wait --nsg-rule RDP
+
+
+subscription="FTA THOVUY rvb - Azure CXP Internal"
+#select subscription
+az account set --subscription "$subscription"
+
+location=eastus
+rg=clients-01
+vm_size=Standard_B2ms
+vnetrg=core-infra
+vnet=eu-vnet
+subnet=clients
+admin_username=azadmin
+admin_password=Microsoft123
+#Windows 10
+offer=office-365
+publisher=microsoftwindowsdesktop
+sku=win10-21h2-avd-m365-g2
+version=latest
+
+vm=WIN10AD04
+#create VM in existing VNET
+SUBNETID=$(az network vnet subnet show --resource-group "$vnetrg" -n "$subnet" --vnet-name "$vnet" --query id -o tsv)
+az vm create -n $vm -g $rg -l $location --image $publisher:$offer:$sku:$version --size $vm_size \
+            --authentication-type Password --admin-username "$admin_username" --admin-password "$admin_password" \
+            --public-ip-address $vm"-pip" --subnet $SUBNETID --no-wait --nsg-rule RDP
+
+
